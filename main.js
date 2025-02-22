@@ -5,7 +5,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 // Initialize Supabase client
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let currentEvent = null;
-let currentUser = null;
+let currentUser = JSON.parse(localStorage.getItem('currentUser')) || null;
 
 // Render Event Creation Form
 function renderCreateEventForm() {
@@ -48,173 +48,82 @@ async function hashPassword(password) {
 
 // Create Event in Supabase
 async function createEvent(e) {
-  e.preventDefault();
-
-  // Correct input ID references to match the HTML form
-  const eventNameInput = document.getElementById('eventName');
-  const usernameInput = document.getElementById('username');  // Corrected ID
-  const passwordInput = document.getElementById('password');  // Corrected ID
-
-  if (!eventNameInput || !usernameInput) {
-      alert('Missing required form fields.');
-      return;
-  }
-
-  const eventName = eventNameInput.value.trim();
-  const username = usernameInput.value.trim();
-  const password = passwordInput?.value.trim() || '';
-
-  if (!eventName || !username) {
-      alert('Event name and username are required.');
-      return;
-  }
-
-  // Generate slug for the event
-  const slug = generateSlug(eventName);
-
-  // Hash the password if provided
-  const passwordHash = password ? await hashPassword(password) : null;
-
-  try {
-      // Insert the event
-      const { data: eventData, error: eventError } = await supabase
-          .from('events')
-          .insert([{ event_name: eventName, slug, created_by: username }])
-          .select()
-          .single();
-
-      if (eventError) {
-          throw new Error(`Error creating event: ${eventError.message}`);
-      }
-
-      const eventId = eventData.id;
-
-      // Create user associated with the event
-      const { error: userError } = await supabase
-          .from('users')
-          .insert([{ event_id: eventId, username, password_hash: passwordHash }]);
-
-      if (userError) {
-          throw new Error(`Error creating user: ${userError.message}`);
-      }
-
-      // Automatically log in as the event creator
-      currentUser = { username, passwordHash };
-      alert(`Event created successfully! Share this link: ${location.origin}/event/${slug}`);
-      window.history.pushState({}, '', `/event/${slug}`);
-      loadEvent(slug, username, passwordHash);
-
-
-  } catch (error) {
-      console.error(error);
-      alert(error.message || 'Failed to create the event.');
-  }
-}
-
-
-
-async function loadEvent(slug, username = null, passwordHash = null) {
-  const { data: eventData, error: eventError } = await supabase
-      .from('events')
-      .select('*, event_items(*)')
-      .eq('slug', slug)
-      .single();
-
-  if (eventError || !eventData) {
-      alert('Event not found.');
-      renderCreateEventForm();
-      return;
-  }
-
-  currentEvent = eventData;
-  currentEvent.items = eventData.event_items || [];
-
-  // If user info is passed, auto-login
-  if (username && passwordHash) {
-      const { data: userData, error: userError } = await supabase
-          .from('users')
-          .select('*')
-          .eq('event_id', currentEvent.id)
-          .eq('username', username)
-          .single();
-
-      if (userData && userData.password_hash === passwordHash) {
-          currentUser = userData;
-          renderEventDashboard();
-          return;
-      }
-  }
-
-  // If no auto-login, show login form
-  renderLoginForm();
-}
-
-
-
-// Render Login Form
-function renderLoginForm() {
-    const app = document.getElementById('app');
-    app.innerHTML = `
-        <h2>${currentEvent.event_name}</h2>
-        <form id="loginForm">
-            <label for="username">Username:</label>
-            <input type="text" id="username" required>
-
-            <label for="password">Password (if set):</label>
-            <input type="password" id="password">
-
-            <button type="submit">Login / Sign Up</button>
-        </form>
-    `;
-
-    document.getElementById('loginForm').addEventListener('submit', handleLogin);
-}
-
-// Handle User Login and Signup
-async function handleLogin(e) {
     e.preventDefault();
-    const username = document.getElementById('username').value.trim();
-    const password = document.getElementById('password').value;
+
+    const eventNameInput = document.getElementById('eventName');
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+
+    if (!eventNameInput || !usernameInput) {
+        alert('Missing required form fields.');
+        return;
+    }
+
+    const eventName = eventNameInput.value.trim();
+    const username = usernameInput.value.trim();
+    const password = passwordInput?.value.trim() || '';
+
+    if (!eventName || !username) {
+        alert('Event name and username are required.');
+        return;
+    }
+
+    const slug = generateSlug(eventName);
     const passwordHash = password ? await hashPassword(password) : null;
 
-    const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('event_id', currentEvent.id)
-        .eq('username', username)
-        .single();
-
-    if (userData) {
-        if (userData.password_hash && userData.password_hash !== passwordHash) {
-            alert('Incorrect password.');
-            return;
-        }
-        currentUser = userData;
-    } else {
-        // Sign up user if not exists
-        const { data: newUser, error: newUserError } = await supabase
-            .from('users')
-            .insert([{ 
-                event_id: currentEvent.id,
-                username,
-                password_hash: passwordHash
-            }])
+    try {
+        const { data: eventData, error: eventError } = await supabase
+            .from('events')
+            .insert([{ event_name: eventName, slug, created_by: username }])
             .select()
             .single();
 
-        if (newUserError) {
-            alert(`Error signing up: ${newUserError.message}`);
-            return;
-        }
-        currentUser = newUser;
+        if (eventError) throw new Error(`Error creating event: ${eventError.message}`);
+
+        const eventId = eventData.id;
+
+        const { error: userError } = await supabase
+            .from('users')
+            .insert([{ event_id: eventId, username, password_hash: passwordHash }]);
+
+        if (userError) throw new Error(`Error creating user: ${userError.message}`);
+
+        currentUser = { username, passwordHash };
+        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+
+        alert(`Event created successfully! Share this link: ${location.origin}/event/${slug}`);
+        window.history.pushState({}, '', `/event/${slug}`);
+        loadEvent(slug);
+    } catch (error) {
+        console.error(error);
+        alert(error.message || 'Failed to create the event.');
     }
+}
+
+// Load Event
+async function loadEvent(slug) {
+    const { data: eventData, error: eventError } = await supabase
+        .from('events')
+        .select('*, event_items(*)')
+        .eq('slug', slug)
+        .single();
+
+    if (eventError || !eventData) {
+        alert('Event not found.');
+        renderCreateEventForm();
+        return;
+    }
+
+    currentEvent = eventData;
+    currentEvent.items = eventData.event_items || [];
 
     renderEventDashboard();
 }
 
+// Render Event Dashboard
 function renderEventDashboard() {
     const app = document.getElementById('app');
-    const isCreator = currentUser.username === currentEvent.created_by;
+    const isCreator = currentUser?.username === currentEvent.created_by;
 
     app.innerHTML = `
       <h2>${currentEvent.event_name}</h2>
@@ -230,15 +139,14 @@ function renderEventDashboard() {
       </div>
     `;
 
-    // If the logged-in user is the creator, attach listener for adding an item
     if (isCreator) {
-        const addItemForm = document.getElementById('addItemForm');
-        if (addItemForm) {
-            addItemForm.addEventListener('submit', handleAddItem);
-        }
+        document.getElementById('addItemForm')?.addEventListener('submit', handleAddItem);
     }
+
+    attachCommitListeners();
 }
 
+// Handle Add Item
 async function handleAddItem(e) {
     e.preventDefault();
     const newItemName = document.getElementById('newItemName').value.trim();
@@ -258,12 +166,11 @@ async function handleAddItem(e) {
         alert("Error adding item: " + error.message);
     } else {
         alert("Item added!");
-        // Reload the event to update the dashboard
         loadEvent(currentEvent.slug);
     }
 }
 
-
+// Render Manage Items
 function renderManageItems() {
     return `
         <div id="itemList">
@@ -282,31 +189,27 @@ function renderManageItems() {
             <button type="submit">Add Item</button>
         </form>
     `;
-  }
-  
-
-
-// Render View Items (Guests)
-function renderViewItems() {
-  if (!currentEvent.items || currentEvent.items.length === 0) {
-      return `<p>No items listed for this event yet.</p>`;
-  }
-
-  return currentEvent.items.map(item => `
-      <p>${item.item_name} - ${item.quantity_required} needed</p>
-  `).join('');
 }
 
+// Attach Commit Listeners
+function attachCommitListeners() {
+    currentEvent.items.forEach(item => {
+        const button = document.getElementById(`commit-btn-${item.id}`);
+        if (button) {
+            button.addEventListener('click', () => commitItem(item.id));
+        }
+    });
+}
 
 // Render Commitment Form
 function renderCommitmentForm() {
-  return currentEvent.items.map(item => `
-      <div>
-          ${item.item_name} (${item.quantity_required} needed)
-          <input type="number" id="commit-${item.id}" min="0">
-          <button onclick="commitItem('${item.id}')">Commit</button>
-      </div>
-  `).join('');
+    return currentEvent.items.map(item => `
+        <div>
+            ${item.item_name} (${item.quantity_required} needed)
+            <input type="number" id="commit-${item.id}" min="0">
+            <button id="commit-btn-${item.id}">Commit</button>
+        </div>
+    `).join('');
 }
 
 // Commit Item
@@ -326,64 +229,10 @@ async function commitItem(itemId) {
             alert(`Error committing item: ${error.message}`);
         } else {
             alert('Commitment successful!');
+            loadEvent(currentEvent.slug);
         }
     }
 }
-
-// Update an Item (Event Creator Only)
-async function updateItem(itemId) {
-  const itemName = document.getElementById(`edit-item-${itemId}`).value.trim();
-  const quantity = parseInt(document.getElementById(`edit-qty-${itemId}`).value);
-
-  const { error } = await supabase
-      .from('event_items')
-      .update({ item_name: itemName, quantity_required: quantity })
-      .eq('id', itemId);
-
-  if (error) {
-      alert(`Error updating item: ${error.message}`);
-  } else {
-      alert('Item updated!');
-      loadEvent(currentEvent.slug);
-  }
-}
-
-// Delete an Item (Event Creator Only)
-async function deleteItem(itemId) {
-  const { error } = await supabase
-      .from('event_items')
-      .delete()
-      .eq('id', itemId);
-
-  if (error) {
-      alert(`Error deleting item: ${error.message}`);
-  } else {
-      alert('Item deleted!');
-      loadEvent(currentEvent.slug);
-  }
-}
-
-// Update Commitment
-async function updateCommitment(itemId) {
-  const quantity = parseInt(document.getElementById(`commit-${itemId}`).value);
-
-  const { error } = await supabase
-      .from('commitments')
-      .upsert([{ 
-          event_id: currentEvent.id,
-          user_id: currentUser.id,
-          item_id: itemId,
-          quantity
-      }]);
-
-  if (error) {
-      alert(`Error updating commitment: ${error.message}`);
-  } else {
-      alert('Commitment updated!');
-      loadEvent(currentEvent.slug);
-  }
-}
-
 
 // Initialize App
 window.addEventListener('DOMContentLoaded', () => {
