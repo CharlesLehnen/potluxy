@@ -212,7 +212,6 @@ async function handleLogin(e) {
     renderEventDashboard();
 }
 
-// Render Event Dashboard
 function renderEventDashboard() {
     const app = document.getElementById('app');
     const isCreator = currentUser.username === currentEvent.created_by;
@@ -231,27 +230,60 @@ function renderEventDashboard() {
       </div>
     `;
 
+    // If the logged-in user is the creator, attach listener for adding an item
+    if (isCreator) {
+        const addItemForm = document.getElementById('addItemForm');
+        if (addItemForm) {
+            addItemForm.addEventListener('submit', handleAddItem);
+        }
+    }
 }
 
-function renderManageItems() {
-  return `
-      <div id="itemList">
-          ${currentEvent.items.map(item => `
-              <div>
-                  <input type="text" value="${item.item_name}" id="edit-item-${item.id}">
-                  <input type="number" value="${item.quantity_required}" id="edit-qty-${item.id}">
-                  <button onclick="updateItem('${item.id}')">Update</button>
-                  <button onclick="deleteItem('${item.id}')">Delete</button>
-              </div>
-          `).join('')}
-      </div>
-      <form id="addItemForm">
-          <input type="text" id="itemName" placeholder="Item Name" required>
-          <input type="number" id="itemQuantity" placeholder="Quantity" min="1" required>
-          <button type="submit">Add Item</button>
-      </form>
-  `;
+async function handleAddItem(e) {
+    e.preventDefault();
+    const newItemName = document.getElementById('newItemName').value.trim();
+    const newItemQuantity = parseInt(document.getElementById('newItemQuantity').value);
+    if (!newItemName || newItemQuantity <= 0) {
+        alert("Please provide a valid item name and quantity.");
+        return;
+    }
+    const { error } = await supabase
+        .from('event_items')
+        .insert([{
+            event_id: currentEvent.id,
+            item_name: newItemName,
+            quantity_required: newItemQuantity
+        }]);
+    if (error) {
+        alert("Error adding item: " + error.message);
+    } else {
+        alert("Item added!");
+        // Reload the event to update the dashboard
+        loadEvent(currentEvent.slug);
+    }
 }
+
+
+function renderManageItems() {
+    return `
+        <div id="itemList">
+            ${currentEvent.items.map(item => `
+                <div>
+                    <input type="text" value="${item.item_name}" id="edit-item-${item.id}">
+                    <input type="number" value="${item.quantity_required}" id="edit-qty-${item.id}">
+                    <button onclick="updateItem('${item.id}')">Update</button>
+                    <button onclick="deleteItem('${item.id}')">Delete</button>
+                </div>
+            `).join('')}
+        </div>
+        <form id="addItemForm">
+            <input type="text" id="newItemName" placeholder="Item Name" required>
+            <input type="number" id="newItemQuantity" placeholder="Quantity" min="1" required>
+            <button type="submit">Add Item</button>
+        </form>
+    `;
+  }
+  
 
 
 // Render View Items (Guests)
