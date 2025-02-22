@@ -111,21 +111,23 @@ async function createEvent(e) {
 
 // Load Event
 async function loadEvent(slug) {
-    const { data: eventData, error: eventError } = await supabase
-        .from('events')
-        .select('*, users!inner(*)')
-        .eq('slug', slug)
-        .single();
+  const { data: eventData, error: eventError } = await supabase
+      .from('events')
+      .select('*, event_items(*)')  // Include related items
+      .eq('slug', slug)
+      .single();
 
-    if (eventError || !eventData) {
-        alert('Event not found.');
-        renderCreateEventForm();
-        return;
-    }
+  if (eventError || !eventData) {
+      alert('Event not found.');
+      renderCreateEventForm();
+      return;
+  }
 
-    currentEvent = eventData;
-    renderLoginForm();
+  currentEvent = eventData;
+  currentEvent.items = eventData.event_items || [];  // Ensure items array exists
+  renderLoginForm();
 }
+
 
 // Render Login Form
 function renderLoginForm() {
@@ -222,10 +224,15 @@ function renderManageItems() {
 
 // Render View Items (Guests)
 function renderViewItems() {
-    return currentEvent.items.map(item => `
-        <p>${item.item_name} - ${item.quantity_required} needed</p>
-    `).join('');
+  if (!currentEvent.items || currentEvent.items.length === 0) {
+      return `<p>No items listed for this event yet.</p>`;
+  }
+
+  return currentEvent.items.map(item => `
+      <p>${item.item_name} - ${item.quantity_required} needed</p>
+  `).join('');
 }
+
 
 // Render Commitment Form
 function renderCommitmentForm() {
