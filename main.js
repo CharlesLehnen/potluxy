@@ -1,15 +1,15 @@
-// Import the Supabase client and config
+// Import Supabase client and config
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Initialize Supabase client
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
 let items = [];
 let currentEvent = null;
 let currentUser = null;
+let eventCreator = null;
 
-// Render the form to create a new event
+// Render Event Creation Form
 function renderCreateEventForm() {
     const app = document.getElementById('app');
     app.innerHTML = `
@@ -17,314 +17,249 @@ function renderCreateEventForm() {
             <h2>Create New Event</h2>
             <label for="eventName">Event Name:</label>
             <input type="text" id="eventName" required>
-            
+
             <label for="itemName">Item Name:</label>
             <input type="text" id="itemName">
-            
+
             <label for="itemQuantity">Quantity Needed:</label>
             <input type="number" id="itemQuantity" min="1">
-            
+
             <button type="button" id="addItemButton">Add Item</button>
-            
             <div id="itemList"></div>
-            
+
             <button type="submit">Create Event</button>
         </form>
     `;
 
-    // Attach event listeners
     document.getElementById('addItemButton').addEventListener('click', addItem);
     document.getElementById('eventForm').addEventListener('submit', createEvent);
 }
 
-// Add an item to the list before creating the event
+// Add Item to List
 function addItem() {
     const itemName = document.getElementById('itemName').value;
-    const itemQuantity = document.getElementById('itemQuantity').value;
-    
-    if (itemName && itemQuantity) {
-        items.push({ name: itemName, quantity: parseInt(itemQuantity) });
+    const itemQuantity = parseInt(document.getElementById('itemQuantity').value);
+    if (itemName && itemQuantity > 0) {
+        items.push({ name: itemName, quantity: itemQuantity });
         updateItemList();
         document.getElementById('itemName').value = '';
         document.getElementById('itemQuantity').value = '';
     }
 }
 
-// Update the item list display
+// Update Item List Display
 function updateItemList() {
     const itemList = document.getElementById('itemList');
     itemList.innerHTML = '';
     items.forEach((item, index) => {
         const itemElement = document.createElement('div');
-        itemElement.className = 'item';
-        itemElement.innerHTML = `
-            <span>${item.name} (${item.quantity})</span>
-            <button class="removeItemButton" data-index="${index}">✖</button>
-        `;
+        itemElement.innerHTML = `${item.name} (${item.quantity}) 
+        <button class="removeItem" data-index="${index}">Remove</button>`;
         itemList.appendChild(itemElement);
     });
 
-    // Attach event listeners for remove buttons
-    document.querySelectorAll('.removeItemButton').forEach(button => {
+    document.querySelectorAll('.removeItem').forEach(button => {
         button.addEventListener('click', () => removeItem(button.dataset.index));
     });
 }
 
-// Remove an item from the list
+// Remove Item from List
 function removeItem(index) {
     items.splice(index, 1);
     updateItemList();
 }
 
-// Create an event and insert into Supabase
+// Generate Unique Slug for Event
+function generateSlug(eventName) {
+    const uniqueId = Math.random().toString(36).substring(2, 10);
+    return eventName.toLowerCase().replace(/\s+/g, '-') + '-' + uniqueId;
+}
+
+// Hash Password (SHA-256)
+async function hashPassword(password) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(hashBuffer))
+        .map(byte => byte.toString(16).padStart(2, '0'))
+        .join('');
+}
+
+// Create Event in Supabase
 async function createEvent(e) {
     e.preventDefault();
-    const eventName = document.getElementById('eventName').value;
+    const eventName = document.getElementById('eventName').value.trim();
+    const slug = generateSlug(eventName);
 
-    if (eventName && items.length > 0) {
+    if (!eventName || items.length === 0) {
+        alert('Please enter an event name and add at least one item.');
+        return;
+    }
+
+    try {
+        // Insert the event
         const { data: eventData, error: eventError } = await supabase
             .from('events')
-            .insert({ event_name: eventName })
+            .insert([{ event_name: eventName, slug, created_by: 'anonymous' }])
+            .select()
             .single();
 
         if (eventError) {
-            alert("Error creating event: " + eventError.message);
+            alert(`Error creating event: ${eventError.message}`);
             return;
         }
 
         const eventId = eventData.id;
 
-        // Insert items into the event_items table
-        for (let item of items) {
+        // Insert event items
+        for (const item of items) {
             const { error: itemError } = await supabase
                 .from('event_items')
-                .insert({
-                    event_id: eventId,
-                    item_name: item.name,
-                    quantity_required: item.quantity
-                });
+                .insert([{ event_id: eventId, item_name: item.name, quantity_required: item.quantity }]);
 
             if (itemError) {
-                alert("Error adding item: " + itemError.message);
+                alert(`Error adding item: ${itemError.message}`);
                 return;
             }
         }
 
-        alert(`Event created! Share this link with your friends:\n${location.origin}/event/${eventId}`);
-        window.history.pushState({}, '', `/event/${eventId}`);
-        loadEvent(eventId);
-    } else {
-        alert('Please enter an event name and add at least one item.');
+        alert(`Event created successfully! Share this link: ${location.origin}/event/${slug}`);
+        window.history.pushState({}, '', `/event/${slug}`);
+        loadEvent(slug);
+    } catch (error) {
+        console.error('Unexpected error:', error);
+        alert('An unexpected error occurred while creating the event.');
     }
 }
 
-// Load event details from Supabase
-async function loadEvent(eventId) {
+// Load Event by Slug
+async function loadEvent(slug) {
     const { data: eventData, error: eventError } = await supabase
         .from('events')
-        .select('*')
-        .eq('id', eventId)
+        .select('id, event_name, created_by')
+        .eq('slug', slug)
         .single();
 
     if (eventError || !eventData) {
-        alert('Event not found');
+        alert('Event not found.');
         renderCreateEventForm();
         return;
     }
 
+    eventCreator = eventData.created_by;
+
     const { data: itemsData, error: itemsError } = await supabase
         .from('event_items')
         .select('*')
-        .eq('event_id', eventId);
+        .eq('event_id', eventData.id);
 
     if (itemsError) {
-        alert('Error fetching event items: ' + itemsError.message);
+        alert(`Error fetching items: ${itemsError.message}`);
         return;
     }
 
-    currentEvent = { id: eventId, name: eventData.event_name, items: itemsData };
+    currentEvent = { id: eventData.id, name: eventData.event_name, items: itemsData };
     renderEventDetails();
 }
 
-// Render event details, user login, and commitments
-async function renderEventDetails() {
-    const { data: commitmentsData, error: commitmentsError } = await supabase
-        .from('commitments')
-        .select('*, event_items(item_name), users(username)')
-        .eq('event_id', currentEvent.id);
-
-    let commitmentHTML = '<h3>Current Commitments</h3>';
-    if (!commitmentsData || commitmentsData.length === 0) {
-        commitmentHTML += '<p>No commitments yet.</p>';
-    } else {
-        const grouped = {};
-        commitmentsData.forEach(commit => {
-            const user = commit.users?.username || 'Unknown';
-            if (!grouped[user]) grouped[user] = [];
-            grouped[user].push({ item: commit.event_items?.item_name, quantity: commit.quantity });
-        });
-
-        for (let user in grouped) {
-            commitmentHTML += `<div class="commitment"><strong>${user}</strong> is bringing:<br>`;
-            grouped[user].forEach(commit => {
-                commitmentHTML += `- ${commit.quantity} ${commit.item}<br>`;
-            });
-            commitmentHTML += '</div>';
-        }
-    }
-
+// Render Event Details
+function renderEventDetails() {
     const app = document.getElementById('app');
     app.innerHTML = `
-        <div id="eventDetails">
-            <h2>${currentEvent.name}</h2>
-            <div id="commitmentSummary">${commitmentHTML}</div>
-            <form id="loginForm">
-                <h3>Login or Sign Up</h3>
-                <label for="username">Your Name:</label>
-                <input type="text" id="username" required>
-                <label for="password">Password (optional):</label>
-                <input type="password" id="password">
-                <button type="submit">Login / Sign Up</button>
-            </form>
-            <div id="errorMessage" class="error"></div>
-            <div id="commitFormContainer" style="display: none;">
-                <form id="commitForm">
-                    <h3>Commit to Bringing Items</h3>
-                    <div id="commitList"></div>
-                    <button type="submit">Commit to Bring Items</button>
-                </form>
-            </div>
-        </div>
+        <h2>${currentEvent.name}</h2>
+        <h3>Items Needed:</h3>
+        <ul>
+            ${currentEvent.items.map(item => `<li>${item.item_name} - ${item.quantity_required} needed</li>`).join('')}
+        </ul>
+        <h3>Login to Commit:</h3>
+        <form id="loginForm">
+            <label for="username">Username:</label>
+            <input type="text" id="username" required>
+
+            <label for="password">Password:</label>
+            <input type="password" id="password" required>
+
+            <button type="submit">Login / Sign Up</button>
+        </form>
     `;
 
     document.getElementById('loginForm').addEventListener('submit', handleLogin);
 }
 
-// Handle user login and sign-up
+// Handle User Login and Signup
 async function handleLogin(e) {
     e.preventDefault();
     const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
+    const passwordHash = await hashPassword(password);
 
-    const { data: usersData, error: usersError } = await supabase
+    const { data: existingUser } = await supabase
         .from('users')
         .select('*')
         .eq('event_id', currentEvent.id)
         .eq('username', username)
         .single();
 
-    if (usersData) {
-        if (usersData.password && usersData.password !== password) {
-            document.getElementById('errorMessage').textContent = 'Incorrect password. Please try again.';
+    if (existingUser) {
+        if (existingUser.password_hash !== passwordHash) {
+            alert('Incorrect password.');
             return;
         }
-        currentUser = usersData;
+        currentUser = existingUser;
     } else {
-        const { data: newUser, error: newUserError } = await supabase
+        const { data: newUser, error: userError } = await supabase
             .from('users')
-            .insert({ event_id: currentEvent.id, username, password })
+            .insert([{ event_id: currentEvent.id, username, password_hash: passwordHash }])
             .single();
 
-        if (newUserError) {
-            alert('Error creating user: ' + newUserError.message);
+        if (userError) {
+            alert(`Error creating user: ${userError.message}`);
             return;
         }
+
         currentUser = newUser;
     }
 
-    document.getElementById('loginForm').style.display = 'none';
-    document.getElementById('errorMessage').textContent = '';
-    document.getElementById('commitFormContainer').style.display = 'block';
     renderCommitForm();
 }
 
-// Render the commitment form for users
-async function renderCommitForm() {
-    const commitList = document.getElementById('commitList');
-    commitList.innerHTML = '';
-
-    const { data: userCommits } = await supabase
-        .from('commitments')
-        .select('*')
-        .eq('event_id', currentEvent.id)
-        .eq('user_id', currentUser.id);
-
-    const userCommitMap = {};
-    if (userCommits) {
-        userCommits.forEach(commit => {
-            userCommitMap[commit.item_id] = commit.quantity;
-        });
-    }
-
-    for (let item of currentEvent.items) {
-        const { data: itemCommits } = await supabase
-            .from('commitments')
-            .select('quantity')
-            .eq('event_id', currentEvent.id)
-            .eq('item_id', item.id);
-
-        const totalCommitted = itemCommits?.reduce((sum, commit) => sum + commit.quantity, 0) || 0;
-        const currentCommitment = userCommitMap[item.id] || 0;
-        const remainingNeeded = item.quantity_required - (totalCommitted - currentCommitment);
-
-        const itemElement = document.createElement('div');
-        itemElement.className = 'item';
-        itemElement.innerHTML = `
-            <span>${item.item_name} (${remainingNeeded} needed)</span>
-            <input type="number" id="commit-${item.id}" min="0" max="${remainingNeeded}" value="${currentCommitment}">
-        `;
-        commitList.appendChild(itemElement);
-    }
-
-    document.getElementById('commitForm').addEventListener('submit', commitItems);
+// Render Commitment Form
+function renderCommitForm() {
+    const app = document.getElementById('app');
+    app.innerHTML += `
+        <h3>Commit to Items</h3>
+        ${currentEvent.items.map(item => `
+            <div>
+                ${item.item_name} (${item.quantity_required} needed)
+                <input type="number" id="commit-${item.id}" min="0">
+                <button onclick="commitItem('${item.id}')">Commit</button>
+            </div>
+        `).join('')}
+    `;
 }
 
-// Handle item commitments by users
-async function commitItems(e) {
-    e.preventDefault();
+// Commit Item
+async function commitItem(itemId) {
+    const quantity = parseInt(document.getElementById(`commit-${itemId}`).value);
+    if (quantity > 0) {
+        const { error } = await supabase
+            .from('commitments')
+            .upsert([{ event_id: currentEvent.id, user_id: currentUser.id, item_id: itemId, quantity }]);
 
-    await supabase
-        .from('commitments')
-        .delete()
-        .eq('event_id', currentEvent.id)
-        .eq('user_id', currentUser.id);
-
-    for (let item of currentEvent.items) {
-        const quantity = parseInt(document.getElementById(`commit-${item.id}`).value) || 0;
-        if (quantity > 0) {
-            const { error: insertError } = await supabase
-                .from('commitments')
-                .insert({
-                    event_id: currentEvent.id,
-                    user_id: currentUser.id,
-                    item_id: item.id,
-                    quantity
-                });
-
-            if (insertError) {
-                alert('Error inserting commitment: ' + insertError.message);
-                return;
-            }
+        if (error) {
+            alert(`Error committing item: ${error.message}`);
+        } else {
+            alert('Commitment successful!');
         }
     }
-
-    alert('Thank you for your commitment!');
-    renderEventDetails();
 }
 
-// Initial render based on the URL
-function initApp() {
-    const path = window.location.pathname;
-    if (path.startsWith('/event/')) {
-        const eventId = path.split('/')[2];
-        loadEvent(eventId);
+// Initialize App
+window.addEventListener('DOMContentLoaded', () => {
+    const slug = window.location.pathname.split('/event/')[1];
+    if (slug) {
+        loadEvent(slug);
     } else {
         renderCreateEventForm();
     }
-}
-
-// Handle browser navigation
-window.onpopstate = initApp;
-
-// Initialize the app
-window.addEventListener('DOMContentLoaded', initApp);
+});
