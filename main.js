@@ -46,50 +46,68 @@ async function hashPassword(password) {
         .join('');
 }
 
+// Create Event in Supabase
 async function createEvent(e) {
   e.preventDefault();
 
-  const eventName = document.getElementById('eventName').value.trim();
-  const username = document.getElementById('creatorUsername').value.trim();  // Get creator's username
-  const password = document.getElementById('creatorPassword').value.trim();  // Optional password
-  const passwordHash = password ? await hashPassword(password) : null;
-  const slug = generateSlug(eventName);
+  // Correct input ID references to match the HTML form
+  const eventNameInput = document.getElementById('eventName');
+  const usernameInput = document.getElementById('username');  // Corrected ID
+  const passwordInput = document.getElementById('password');  // Corrected ID
+
+  if (!eventNameInput || !usernameInput) {
+      alert('Missing required form fields.');
+      return;
+  }
+
+  const eventName = eventNameInput.value.trim();
+  const username = usernameInput.value.trim();
+  const password = passwordInput?.value.trim() || '';
 
   if (!eventName || !username) {
       alert('Event name and username are required.');
       return;
   }
 
-  // Create the event with the creator's username
-  const { data: eventData, error: eventError } = await supabase
-      .from('events')
-      .insert([{ event_name: eventName, slug, created_by: username }])
-      .select()
-      .single();
+  // Generate slug for the event
+  const slug = generateSlug(eventName);
 
-  if (eventError) {
-      alert(`Error creating event: ${eventError.message}`);
-      return;
+  // Hash the password if provided
+  const passwordHash = password ? await hashPassword(password) : null;
+
+  try {
+      // Insert the event
+      const { data: eventData, error: eventError } = await supabase
+          .from('events')
+          .insert([{ event_name: eventName, slug, created_by: username }])
+          .select()
+          .single();
+
+      if (eventError) {
+          throw new Error(`Error creating event: ${eventError.message}`);
+      }
+
+      const eventId = eventData.id;
+
+      // Create user associated with the event
+      const { error: userError } = await supabase
+          .from('users')
+          .insert([{ event_id: eventId, username, password_hash: passwordHash }]);
+
+      if (userError) {
+          throw new Error(`Error creating user: ${userError.message}`);
+      }
+
+      alert(`Event created successfully! Share this link: ${location.origin}/event/${slug}`);
+      window.history.pushState({}, '', `/event/${slug}`);
+      loadEvent(slug);
+  } catch (error) {
+      console.error(error);
+      alert(error.message || 'Failed to create the event.');
   }
-
-  // Add the event creator as a user
-  const { error: userError } = await supabase
-      .from('users')
-      .insert([{ 
-          event_id: eventData.id, 
-          username: username, 
-          password_hash: passwordHash 
-      }]);
-
-  if (userError) {
-      alert(`Error creating user for event: ${userError.message}`);
-      return;
-  }
-
-  alert(`Event created successfully! Share this link: ${location.origin}/event/${slug}`);
-  window.history.pushState({}, '', `/event/${slug}`);
-  loadEvent(slug);
 }
+
+
 
 // Load Event
 async function loadEvent(slug) {
