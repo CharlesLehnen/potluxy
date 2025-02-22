@@ -98,13 +98,9 @@ async function createEvent(e) {
           throw new Error(`Error creating user: ${userError.message}`);
       }
 
-      // Automatically log in as the event creator
-      currentUser = { username, passwordHash };
       alert(`Event created successfully! Share this link: ${location.origin}/event/${slug}`);
       window.history.pushState({}, '', `/event/${slug}`);
-      loadEvent(slug, username, passwordHash);
-
-
+      loadEvent(slug);
   } catch (error) {
       console.error(error);
       alert(error.message || 'Failed to create the event.');
@@ -113,10 +109,11 @@ async function createEvent(e) {
 
 
 
-async function loadEvent(slug, username = null, passwordHash = null) {
+// Load Event
+async function loadEvent(slug) {
   const { data: eventData, error: eventError } = await supabase
       .from('events')
-      .select('*, event_items(*)')
+      .select('*, event_items(*)')  // Include related items
       .eq('slug', slug)
       .single();
 
@@ -127,28 +124,9 @@ async function loadEvent(slug, username = null, passwordHash = null) {
   }
 
   currentEvent = eventData;
-  currentEvent.items = eventData.event_items || [];
-
-  // If user info is passed, auto-login
-  if (username && passwordHash) {
-      const { data: userData, error: userError } = await supabase
-          .from('users')
-          .select('*')
-          .eq('event_id', currentEvent.id)
-          .eq('username', username)
-          .single();
-
-      if (userData && userData.password_hash === passwordHash) {
-          currentUser = userData;
-          renderEventDashboard();
-          return;
-      }
-  }
-
-  // If no auto-login, show login form
+  currentEvent.items = eventData.event_items || [];  // Ensure items array exists
   renderLoginForm();
 }
-
 
 
 // Render Login Form
@@ -215,44 +193,34 @@ async function handleLogin(e) {
 // Render Event Dashboard
 function renderEventDashboard() {
     const app = document.getElementById('app');
-    const isCreator = currentUser.username === currentEvent.created_by;
+    const isCreator = currentUser.is_creator;
 
     app.innerHTML = `
-      <h2>${currentEvent.event_name}</h2>
-      <div style="display: flex; gap: 20px;">
-          <div>
-              <h3>Items Needed</h3>
-              ${isCreator ? renderManageItems() : renderViewItems()}
-          </div>
-          <div>
-              <h3>Your Commitments</h3>
-              ${renderCommitmentForm()}
-          </div>
-      </div>
+        <h2>${currentEvent.event_name}</h2>
+        <div style="display: flex; gap: 20px;">
+            <div>
+                <h3>Items Needed</h3>
+                ${isCreator ? renderManageItems() : renderViewItems()}
+            </div>
+            <div>
+                <h3>Your Commitments</h3>
+                ${renderCommitmentForm()}
+            </div>
+        </div>
     `;
-
 }
 
+// Render Manage Items (Creator Only)
 function renderManageItems() {
-  return `
-      <div id="itemList">
-          ${currentEvent.items.map(item => `
-              <div>
-                  <input type="text" value="${item.item_name}" id="edit-item-${item.id}">
-                  <input type="number" value="${item.quantity_required}" id="edit-qty-${item.id}">
-                  <button onclick="updateItem('${item.id}')">Update</button>
-                  <button onclick="deleteItem('${item.id}')">Delete</button>
-              </div>
-          `).join('')}
-      </div>
-      <form id="addItemForm">
-          <input type="text" id="itemName" placeholder="Item Name" required>
-          <input type="number" id="itemQuantity" placeholder="Quantity" min="1" required>
-          <button type="submit">Add Item</button>
-      </form>
-  `;
+    return `
+        <div id="itemList"></div>
+        <form id="addItemForm">
+            <input type="text" id="itemName" placeholder="Item Name" required>
+            <input type="number" id="itemQuantity" placeholder="Quantity" min="1" required>
+            <button type="submit">Add Item</button>
+        </form>
+    `;
 }
-
 
 // Render View Items (Guests)
 function renderViewItems() {
@@ -268,13 +236,13 @@ function renderViewItems() {
 
 // Render Commitment Form
 function renderCommitmentForm() {
-  return currentEvent.items.map(item => `
-      <div>
-          ${item.item_name} (${item.quantity_required} needed)
-          <input type="number" id="commit-${item.id}" min="0">
-          <button onclick="commitItem('${item.id}')">Commit</button>
-      </div>
-  `).join('');
+    return currentEvent.items.map(item => `
+        <div>
+            ${item.item_name} (${item.quantity_required} needed)
+            <input type="number" id="commit-${item.id}" min="0">
+            <button onclick="commitItem('${item.id}')">Commit</button>
+        </div>
+    `).join('');
 }
 
 // Commit Item
@@ -297,61 +265,6 @@ async function commitItem(itemId) {
         }
     }
 }
-
-// Update an Item (Event Creator Only)
-async function updateItem(itemId) {
-  const itemName = document.getElementById(`edit-item-${itemId}`).value.trim();
-  const quantity = parseInt(document.getElementById(`edit-qty-${itemId}`).value);
-
-  const { error } = await supabase
-      .from('event_items')
-      .update({ item_name: itemName, quantity_required: quantity })
-      .eq('id', itemId);
-
-  if (error) {
-      alert(`Error updating item: ${error.message}`);
-  } else {
-      alert('Item updated!');
-      loadEvent(currentEvent.slug);
-  }
-}
-
-// Delete an Item (Event Creator Only)
-async function deleteItem(itemId) {
-  const { error } = await supabase
-      .from('event_items')
-      .delete()
-      .eq('id', itemId);
-
-  if (error) {
-      alert(`Error deleting item: ${error.message}`);
-  } else {
-      alert('Item deleted!');
-      loadEvent(currentEvent.slug);
-  }
-}
-
-// Update Commitment
-async function updateCommitment(itemId) {
-  const quantity = parseInt(document.getElementById(`commit-${itemId}`).value);
-
-  const { error } = await supabase
-      .from('commitments')
-      .upsert([{ 
-          event_id: currentEvent.id,
-          user_id: currentUser.id,
-          item_id: itemId,
-          quantity
-      }]);
-
-  if (error) {
-      alert(`Error updating commitment: ${error.message}`);
-  } else {
-      alert('Commitment updated!');
-      loadEvent(currentEvent.slug);
-  }
-}
-
 
 // Initialize App
 window.addEventListener('DOMContentLoaded', () => {
