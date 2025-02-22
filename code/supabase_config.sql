@@ -66,7 +66,7 @@ CREATE POLICY "Public select on events"
 ON events FOR SELECT
 USING (true);
 
--- Allow anyone to INSERT new events
+-- Allow anyone to INSERT new events without authentication
 CREATE POLICY "Public insert on events"
 ON events FOR INSERT
 WITH CHECK (true);
@@ -100,7 +100,6 @@ WITH CHECK (
   EXISTS (
     SELECT 1 FROM events
     WHERE events.id = event_items.event_id
-    AND events.created_by = current_setting('request.jwt.claims', true)::jsonb->>'username'
   )
 );
 
@@ -140,7 +139,6 @@ USING (
   EXISTS (
     SELECT 1 FROM users
     WHERE users.id = commitments.user_id
-    AND users.username = current_setting('request.jwt.claims', true)::jsonb->>'username'
   )
 );
 
@@ -150,7 +148,6 @@ WITH CHECK (
   EXISTS (
     SELECT 1 FROM users
     WHERE users.id = commitments.user_id
-    AND users.username = current_setting('request.jwt.claims', true)::jsonb->>'username'
   )
 );
 
@@ -160,7 +157,6 @@ USING (
   EXISTS (
     SELECT 1 FROM users
     WHERE users.id = commitments.user_id
-    AND users.username = current_setting('request.jwt.claims', true)::jsonb->>'username'
   )
 );
 
@@ -170,6 +166,5 @@ USING (
   EXISTS (
     SELECT 1 FROM users
     WHERE users.id = commitments.user_id
-    AND users.username = current_setting('request.jwt.claims', true)::jsonb->>'username'
   )
 );
