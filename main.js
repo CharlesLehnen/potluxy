@@ -50,9 +50,18 @@ async function hashPassword(password) {
 async function createEvent(e) {
     e.preventDefault();
 
-    const eventName = document.getElementById('eventName').value.trim();
-    const username = document.getElementById('username').value.trim();
-    const password = document.getElementById('password').value.trim() || '';
+    const eventNameInput = document.getElementById('eventName');
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+
+    if (!eventNameInput || !usernameInput) {
+        alert('Missing required form fields.');
+        return;
+    }
+
+    const eventName = eventNameInput.value.trim();
+    const username = usernameInput.value.trim();
+    const password = passwordInput?.value.trim() || '';
 
     if (!eventName || !username) {
         alert('Event name and username are required.');
@@ -63,7 +72,6 @@ async function createEvent(e) {
     const passwordHash = password ? await hashPassword(password) : null;
 
     try {
-        // Insert event
         const { data: eventData, error: eventError } = await supabase
             .from('events')
             .insert([{ event_name: eventName, slug, created_by: username }])
@@ -74,24 +82,13 @@ async function createEvent(e) {
 
         const eventId = eventData.id;
 
-        // Insert user associated with the event
         const { error: userError } = await supabase
             .from('users')
             .insert([{ event_id: eventId, username, password_hash: passwordHash }]);
 
         if (userError) throw new Error(`Error creating user: ${userError.message}`);
 
-        // Fetch user ID and store in currentUser
-        const { data: userData, error: userFetchError } = await supabase
-            .from('users')
-            .select('id')
-            .eq('event_id', eventId)
-            .eq('username', username)
-            .single();
-
-        if (userFetchError) throw new Error(`Error fetching user ID: ${userFetchError.message}`);
-
-        currentUser = { username, passwordHash, id: userData.id };
+        currentUser = { username, passwordHash };
         localStorage.setItem('currentUser', JSON.stringify(currentUser));
 
         alert(`Event created successfully! Share this link: ${location.origin}/event/${slug}`);
@@ -119,21 +116,6 @@ async function loadEvent(slug) {
 
     currentEvent = eventData;
     currentEvent.items = eventData.event_items || [];
-
-    // Ensure currentUser ID is populated
-    if (currentUser?.username) {
-        const { data: userData, error: userError } = await supabase
-            .from('users')
-            .select('id')
-            .eq('event_id', currentEvent.id)
-            .eq('username', currentUser.username)
-            .single();
-
-        if (userData) {
-            currentUser.id = userData.id;
-            localStorage.setItem('currentUser', JSON.stringify(currentUser));
-        }
-    }
 
     renderEventDashboard();
 }
@@ -173,15 +155,17 @@ async function handleAddItem(e) {
         alert("Please provide a valid item name and quantity.");
         return;
     }
-
     const { error } = await supabase
         .from('event_items')
-        .insert([{ event_id: currentEvent.id, item_name: newItemName, quantity_required: newItemQuantity }]);
-
+        .insert([{
+            event_id: currentEvent.id,
+            item_name: newItemName,
+            quantity_required: newItemQuantity
+        }]);
     if (error) {
-        alert(`Error adding item: ${error.message}`);
+        alert("Error adding item: " + error.message);
     } else {
-        alert("Item added successfully!");
+        alert("Item added!");
         loadEvent(currentEvent.slug);
     }
 }
@@ -231,7 +215,7 @@ function renderCommitmentForm() {
 // Commit Item
 async function commitItem(itemId) {
     const quantity = parseInt(document.getElementById(`commit-${itemId}`).value);
-    if (quantity > 0 && currentUser?.id) {
+    if (quantity > 0) {
         const { error } = await supabase
             .from('commitments')
             .upsert([{ 
@@ -247,41 +231,6 @@ async function commitItem(itemId) {
             alert('Commitment successful!');
             loadEvent(currentEvent.slug);
         }
-    } else {
-        alert('Invalid quantity or user not authenticated.');
-    }
-}
-
-// Update Item (Event Creator Only)
-async function updateItem(itemId) {
-    const itemName = document.getElementById(`edit-item-${itemId}`).value.trim();
-    const quantity = parseInt(document.getElementById(`edit-qty-${itemId}`).value);
-
-    const { error } = await supabase
-        .from('event_items')
-        .update({ item_name: itemName, quantity_required: quantity })
-        .eq('id', itemId);
-
-    if (error) {
-        alert(`Error updating item: ${error.message}`);
-    } else {
-        alert('Item updated successfully!');
-        loadEvent(currentEvent.slug);
-    }
-}
-
-// Delete Item (Event Creator Only)
-async function deleteItem(itemId) {
-    const { error } = await supabase
-        .from('event_items')
-        .delete()
-        .eq('id', itemId);
-
-    if (error) {
-        alert(`Error deleting item: ${error.message}`);
-    } else {
-        alert('Item deleted successfully!');
-        loadEvent(currentEvent.slug);
     }
 }
 
