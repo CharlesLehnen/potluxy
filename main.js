@@ -75,7 +75,7 @@ async function createEvent(e) {
     if (eventError) throw new Error(`Error creating event: ${eventError.message}`);
     const eventId = eventData.id;
 
-    // Create the event creator's user record (and retrieve the full record)
+    // Create the event creator's user record
     const { data: newUser, error: userError } = await supabase
       .from('users')
       .insert([{ event_id: eventId, username, password_hash: passwordHash }])
@@ -178,7 +178,7 @@ async function handleLogin(e) {
 async function renderEventDashboard() {
   const app = document.getElementById('app');
   const isCreator = currentUser?.username === currentEvent.created_by;
-  // Render the detailed commitment form.
+  // Render detailed commitment info.
   const commitmentFormHTML = await renderCommitmentForm();
   app.innerHTML = `
     <h2>${currentEvent.event_name}</h2>
@@ -246,7 +246,8 @@ async function renderCommitmentForm() {
   }
   return currentEvent.items.map(item => {
     const totalCommitted = commitmentTotals[item.id] || 0;
-    const yourCommitment = userCommitments[item.id] || 0;
+    // Ensure that if there is no commitment, we default to 0.
+    const yourCommitment = (userCommitments[item.id] !== undefined) ? userCommitments[item.id] : 0;
     const remaining = item.quantity_required - totalCommitted;
     return `
       <div>
@@ -319,32 +320,34 @@ async function deleteItem(itemId) {
 }
 
 async function commitItem(itemId) {
-  const quantity = parseInt(document.getElementById(`commit-${itemId}`).value);
-  // Allow zero or more as valid; upsert will insert or update.
-  if (quantity >= 0) {
-    const { error } = await supabase
-      .from('commitments')
-      .upsert([{ 
-        event_id: currentEvent.id,
-        user_id: currentUser.id,
-        item_id: itemId,
-        quantity
-      }]);
-    if (error) {
-      alert(`Error committing item: ${error.message}`);
-    } else {
-      alert('Commitment successful!');
-      await loadEvent(currentEvent.slug);
-    }
+  const inputEl = document.getElementById(`commit-${itemId}`);
+  const quantity = parseInt(inputEl.value);
+  if (isNaN(quantity) || quantity < 0) {
+    alert("Please enter a valid number for commitment.");
+    return;
+  }
+  // Use onConflict option to update if the record already exists.
+  const { error } = await supabase
+    .from('commitments')
+    .upsert([{
+      event_id: currentEvent.id,
+      user_id: currentUser.id,
+      item_id: itemId,
+      quantity
+    }], { onConflict: ['event_id', 'user_id', 'item_id'] });
+  if (error) {
+    alert(`Error committing item: ${error.message}`);
+  } else {
+    alert('Commitment successful!');
+    await loadEvent(currentEvent.slug);
   }
 }
 
 // ----------------------
-// 5. Helper: Attach Commit Listeners (stub in case extra wiring is needed)
+// 5. Helper: Attach Commit Listeners (stub)
 // ----------------------
 function attachCommitListeners() {
-  // Currently, our inline onclick handlers on commitment buttons handle commits.
-  // If additional wiring is needed, add it here.
+  // Inline onclicks are used in renderCommitmentForm, so nothing extra is needed here.
 }
 
 // Expose functions so inline onclick attributes can find them.
