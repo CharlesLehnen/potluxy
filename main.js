@@ -92,7 +92,7 @@ async function createEvent(e) {
     }
 
     alert(`Event created successfully! Share this link: ${location.origin}/event/${eventSlug}`);
-    window.history.pushState({}, '', `/event/${eventSlug}`);
+    window.location.hash = `#/event/${eventSlug}`;
     loadEvent(eventSlug);
 }
 
@@ -388,8 +388,9 @@ window.commitItem = commitItem;
 // 6. App Initialization
 // ----------------------
 window.addEventListener('DOMContentLoaded', async () => {
-  const slug = window.location.pathname.split('/event/')[1];
-  if (slug) {
+  const hash = window.location.hash;
+  if (hash && hash.startsWith("#/event/")) {
+    const slug = hash.split("#/event/")[1];
     await loadEvent(slug);
   } else {
     renderCreateEventForm();
