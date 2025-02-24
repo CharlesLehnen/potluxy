@@ -154,43 +154,62 @@ function renderLoginForm(slug) {
 }
 
 async function handleLogin(e, slug) {
-  e.preventDefault();
-  const username = document.getElementById('username').value.trim();
-  const password = document.getElementById('password').value.trim();
-  const email = constructEmail(username, slug);
+    e.preventDefault();
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value.trim();
+    const email = constructEmail(username, slug);
   
-  // Sign in via Supabase Auth.
-  const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-    email, password: password || 'no-password'
-  });
-  if (signInError) {
-    alert(`Error signing in: ${signInError.message}`);
-    return;
-  }
-  // Fetch (or create) the event-specific profile.
-  const { data: profileData } = await supabase
-    .from('event_users')
-    .select('*')
-    .eq('id', signInData.session.user.id)
-    .eq('event_id', currentEvent.id)
-    .single();
-  if (!profileData) {
-    // Create profile if it doesn't exist.
-    const { data: newProfile, error: newProfileError } = await supabase
-      .from('event_users')
-      .insert([{ id: signInData.session.user.id, event_id: currentEvent.id, username }])
-      .select()
-      .single();
-    if (newProfileError) {
-      alert(`Error creating event user: ${newProfileError.message}`);
-      return;
+    // Attempt to sign in
+    let { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      email, 
+      password: password || 'no-password'
+    });
+  
+    // If sign in fails with "Invalid login credentials", try to sign up instead
+    if (signInError) {
+      if (signInError.message.includes("Invalid login credentials")) {
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email, 
+          password: password || 'no-password'
+        });
+        if (signUpError) {
+          alert(`Error signing up: ${signUpError.message}`);
+          return;
+        }
+        signInData = signUpData; // Use the sign-up result as our auth data
+      } else {
+        alert(`Error signing in: ${signInError.message}`);
+        return;
+      }
     }
-    currentUser = newProfile;
-  } else {
-    currentUser = profileData;
+  
+    // At this point, we have a session
+    // Fetch the event-specific profile from event_users
+    const { data: profileData } = await supabase
+      .from('event_users')
+      .select('*')
+      .eq('id', signInData.session.user.id)
+      .eq('event_id', currentEvent.id)
+      .single();
+  
+    if (!profileData) {
+      // If no profile exists, create one
+      const { data: newProfile, error: newProfileError } = await supabase
+        .from('event_users')
+        .insert([{ id: signInData.session.user.id, event_id: currentEvent.id, username }])
+        .select()
+        .single();
+      if (newProfileError) {
+        alert(`Error creating event user: ${newProfileError.message}`);
+        return;
+      }
+      currentUser = newProfile;
+    } else {
+      currentUser = profileData;
+    }
+    renderEventDashboard();
   }
-  renderEventDashboard();
-}
+  
 
 // ----------------------
 // 3. Event Dashboard & Detailed Commitment Display
