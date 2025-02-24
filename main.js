@@ -5,12 +5,18 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 // Initialize Supabase client
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let currentEvent = null;
-let currentUser = JSON.parse(localStorage.getItem('currentUser')) || null;
+let currentUser = null; // This will be managed via supabase.auth
+
+// Utility: Construct event-specific email from username and event slug.
+function constructEmail(username, slug) {
+  // For example, if your domain is example.com, use:
+  return `${username}.${slug}@mailinator.com`;
+}
 
 // ----------------------
 // 1. Event Creation (for creators)
 // ----------------------
-function renderCreateEventForm() {
+async function renderCreateEventForm() {
   const app = document.getElementById('app');
   app.innerHTML = `
     <form id="eventForm">
@@ -32,70 +38,67 @@ function generateSlug(eventName) {
   return eventName.toLowerCase().replace(/\s+/g, '-') + '-' + uniqueId;
 }
 
-async function hashPassword(password) {
-  if (!password) return null;
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map(byte => byte.toString(16).padStart(2, '0'))
-    .join('');
-}
-
+// Ensure the user is authenticated before inserting into event_users
 async function createEvent(e) {
-  e.preventDefault();
-  const eventNameInput = document.getElementById('eventName');
-  const usernameInput = document.getElementById('username');
-  const passwordInput = document.getElementById('password');
+    e.preventDefault();
+    const eventName = document.getElementById('eventName').value.trim();
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value.trim();
+    const eventSlug = generateSlug(eventName);
+    const email = constructEmail(username, eventSlug);
 
-  if (!eventNameInput || !usernameInput) {
-    alert('Missing required form fields.');
-    return;
-  }
+    // 1. Sign up the user
+    const { data: authData, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password: password || 'no-password'
+    });
 
-  const eventName = eventNameInput.value.trim();
-  const username = usernameInput.value.trim();
-  const password = passwordInput?.value.trim() || '';
+    if (signUpError) {
+        alert(`Error signing up: ${signUpError.message}`);
+        return;
+    }
 
-  if (!eventName || !username) {
-    alert('Event name and username are required.');
-    return;
-  }
+    // 2. Ensure the user session is active
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !sessionData.session) {
+        alert('Error: User not fully authenticated after signup.');
+        return;
+    }
 
-  const slug = generateSlug(eventName);
-  const passwordHash = password ? await hashPassword(password) : null;
+    const userId = sessionData.session.user.id;
 
-  try {
-    // Create the event
+    // 3. Create the event
     const { data: eventData, error: eventError } = await supabase
-      .from('events')
-      .insert([{ event_name: eventName, slug, created_by: username }])
-      .select()
-      .single();
-    if (eventError) throw new Error(`Error creating event: ${eventError.message}`);
+        .from('events')
+        .insert([{ event_name: eventName, slug: eventSlug, created_by: username }])
+        .select()
+        .single();
+
+    if (eventError) {
+        alert(`Error creating event: ${eventError.message}`);
+        return;
+    }
+
     const eventId = eventData.id;
 
-    // Create the event creator's user record
-    const { data: newUser, error: userError } = await supabase
-      .from('users')
-      .insert([{ event_id: eventId, username, password_hash: passwordHash }])
-      .select()
-      .single();
-    if (userError) throw new Error(`Error creating user: ${userError.message}`);
-    currentUser = newUser;
-    localStorage.setItem('currentUser', JSON.stringify(currentUser));
+    // 4. Insert event user (linked to auth.uid())
+    const { data: profileData, error: profileError } = await supabase
+        .from('event_users')
+        .insert([{ id: userId, event_id: eventId, username }]);
 
-    alert(`Event created successfully! Share this link: ${location.origin}/event/${slug}`);
-    window.history.pushState({}, '', `/event/${slug}`);
-    loadEvent(slug);
-  } catch (error) {
-    console.error(error);
-    alert(error.message || 'Failed to create the event.');
-  }
+    if (profileError) {
+        alert(`Error creating event user: ${profileError.message}`);
+        return;
+    }
+
+    alert(`Event created successfully! Share this link: ${location.origin}/event/${eventSlug}`);
+    window.history.pushState({}, '', `/event/${eventSlug}`);
+    loadEvent(eventSlug);
 }
 
+
 // ----------------------
-// 2. Event Loading & Guest Login
+// 2. Event Loading & Login (Per Event)
 // ----------------------
 async function loadEvent(slug) {
   const { data: eventData, error: eventError } = await supabase
@@ -110,75 +113,92 @@ async function loadEvent(slug) {
   }
   currentEvent = eventData;
   currentEvent.items = eventData.event_items || [];
-  // If no user is logged in, show the login form for guests.
-  if (!currentUser) {
-    renderLoginForm();
+  
+  // Check Supabase Auth session.
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    renderLoginForm(slug);
   } else {
-    await renderEventDashboard();
+    // Fetch the event_users record for this user and event.
+    const { data: profileData } = await supabase
+      .from('event_users')
+      .select('*')
+      .eq('id', session.user.id)
+      .eq('event_id', currentEvent.id)
+      .single();
+    if (!profileData) {
+      // If no profile exists, you can create one now.
+      alert("No event-specific profile found; please sign up for this event.");
+      renderLoginForm(slug);
+    } else {
+      currentUser = profileData;
+      renderEventDashboard();
+    }
   }
 }
 
-function renderLoginForm() {
+function renderLoginForm(slug) {
   const app = document.getElementById('app');
   app.innerHTML = `
     <h2>${currentEvent.event_name}</h2>
     <form id="loginForm">
       <label for="username">Username:</label>
       <input type="text" id="username" required>
-      <label for="password">Password (if set):</label>
+      <label for="password">Password:</label>
       <input type="password" id="password">
       <button type="submit">Login / Sign Up</button>
     </form>
     <p>If you don't have an account for this event, signing up will create one.</p>
   `;
-  document.getElementById('loginForm').addEventListener('submit', handleLogin);
+  document.getElementById('loginForm').addEventListener('submit', (e) => handleLogin(e, slug));
 }
 
-async function handleLogin(e) {
+async function handleLogin(e, slug) {
   e.preventDefault();
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value.trim();
-  const passwordHash = password ? await hashPassword(password) : null;
-
-  const { data: userData, error: userError } = await supabase
-    .from('users')
+  const email = constructEmail(username, slug);
+  
+  // Sign in via Supabase Auth.
+  const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+    email, password: password || 'no-password'
+  });
+  if (signInError) {
+    alert(`Error signing in: ${signInError.message}`);
+    return;
+  }
+  // Fetch (or create) the event-specific profile.
+  const { data: profileData } = await supabase
+    .from('event_users')
     .select('*')
+    .eq('id', signInData.session.user.id)
     .eq('event_id', currentEvent.id)
-    .eq('username', username)
     .single();
-
-  if (userData) {
-    if (userData.password_hash && userData.password_hash !== passwordHash) {
-      alert('Incorrect password.');
-      return;
-    }
-    currentUser = userData;
-    localStorage.setItem('currentUser', JSON.stringify(currentUser));
-    await renderEventDashboard();
-  } else {
-    // Create a new user if one doesn't exist.
-    const { data: newUser, error: newUserError } = await supabase
-      .from('users')
-      .insert([{ event_id: currentEvent.id, username, password_hash: passwordHash }])
+  if (!profileData) {
+    // Create profile if it doesn't exist.
+    const { data: newProfile, error: newProfileError } = await supabase
+      .from('event_users')
+      .insert([{ id: signInData.session.user.id, event_id: currentEvent.id, username }])
       .select()
       .single();
-    if (newUserError) {
-      alert(`Error signing up: ${newUserError.message}`);
+    if (newProfileError) {
+      alert(`Error creating event user: ${newProfileError.message}`);
       return;
     }
-    currentUser = newUser;
-    localStorage.setItem('currentUser', JSON.stringify(currentUser));
-    await renderEventDashboard();
+    currentUser = newProfile;
+  } else {
+    currentUser = profileData;
   }
+  renderEventDashboard();
 }
 
 // ----------------------
 // 3. Event Dashboard & Detailed Commitment Display
+// (This section is similar to your existing code; the JWT is now managed by Supabase Auth.)
 // ----------------------
 async function renderEventDashboard() {
   const app = document.getElementById('app');
   const isCreator = currentUser?.username === currentEvent.created_by;
-  // Render detailed commitment info.
   const commitmentFormHTML = await renderCommitmentForm();
   app.innerHTML = `
     <h2>${currentEvent.event_name}</h2>
@@ -229,7 +249,6 @@ function renderViewItems() {
 }
 
 async function renderCommitmentForm() {
-  // Query all commitments for the event.
   const { data: allCommitments } = await supabase
     .from('commitments')
     .select('*')
@@ -246,8 +265,7 @@ async function renderCommitmentForm() {
   }
   return currentEvent.items.map(item => {
     const totalCommitted = commitmentTotals[item.id] || 0;
-    // Ensure that if there is no commitment, we default to 0.
-    const yourCommitment = (userCommitments[item.id] !== undefined) ? userCommitments[item.id] : 0;
+    const yourCommitment = (userCommitments[item.id] === undefined) ? 0 : userCommitments[item.id];
     const remaining = item.quantity_required - totalCommitted;
     return `
       <div>
@@ -283,11 +301,15 @@ async function handleAddItem(e) {
     alert("Error adding item: " + error.message);
   } else {
     alert("Item added!");
-    await loadEvent(currentEvent.slug);
+    loadEvent(currentEvent.slug);
   }
 }
 
 async function updateItem(itemId) {
+  if (currentUser?.username !== currentEvent.created_by) {
+    alert("Only the event creator can update items.");
+    return;
+  }
   const newItemName = document.getElementById(`edit-item-${itemId}`).value.trim();
   const newQuantity = parseInt(document.getElementById(`edit-qty-${itemId}`).value);
   if (!newItemName || newQuantity <= 0) {
@@ -301,12 +323,19 @@ async function updateItem(itemId) {
   if (error) {
     alert(`Error updating item: ${error.message}`);
   } else {
-    alert("Item updated!");
-    await loadEvent(currentEvent.slug);
+    alert("Item updated successfully!");
+    loadEvent(currentEvent.slug);
   }
 }
 
 async function deleteItem(itemId) {
+  if (currentUser?.username !== currentEvent.created_by) {
+    alert("Only the event creator can delete items.");
+    return;
+  }
+  if (!confirm("Are you sure you want to delete this item? This cannot be undone.")) {
+    return;
+  }
   const { error } = await supabase
     .from('event_items')
     .delete()
@@ -314,8 +343,8 @@ async function deleteItem(itemId) {
   if (error) {
     alert(`Error deleting item: ${error.message}`);
   } else {
-    alert("Item deleted!");
-    await loadEvent(currentEvent.slug);
+    alert("Item deleted successfully!");
+    loadEvent(currentEvent.slug);
   }
 }
 
@@ -326,7 +355,7 @@ async function commitItem(itemId) {
     alert("Please enter a valid number for commitment.");
     return;
   }
-  // Use onConflict option to update if the record already exists.
+  // Upsert commitment using onConflict.
   const { error } = await supabase
     .from('commitments')
     .upsert([{
@@ -339,7 +368,7 @@ async function commitItem(itemId) {
     alert(`Error committing item: ${error.message}`);
   } else {
     alert('Commitment successful!');
-    await loadEvent(currentEvent.slug);
+    loadEvent(currentEvent.slug);
   }
 }
 
@@ -347,7 +376,7 @@ async function commitItem(itemId) {
 // 5. Helper: Attach Commit Listeners (stub)
 // ----------------------
 function attachCommitListeners() {
-  // Inline onclicks are used in renderCommitmentForm, so nothing extra is needed here.
+  // Inline onclicks in renderCommitmentForm handle commits.
 }
 
 // Expose functions so inline onclick attributes can find them.
@@ -358,10 +387,10 @@ window.commitItem = commitItem;
 // ----------------------
 // 6. App Initialization
 // ----------------------
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   const slug = window.location.pathname.split('/event/')[1];
   if (slug) {
-    loadEvent(slug);
+    await loadEvent(slug);
   } else {
     renderCreateEventForm();
   }
