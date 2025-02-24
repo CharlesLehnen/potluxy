@@ -132,3 +132,18 @@ CREATE POLICY "Commitments update" ON commitments FOR UPDATE
   USING (user_id = auth.uid());
 CREATE POLICY "Commitments delete" ON commitments FOR DELETE
   USING (user_id = auth.uid());
+
+-- Make sure this works, it is untested
+CREATE POLICY "Prevent overcommitments"
+ON commitments
+FOR INSERT, UPDATE
+WITH CHECK (
+  quantity <= (
+    SELECT quantity_required - COALESCE(SUM(quantity), 0)
+    FROM event_items
+    LEFT JOIN commitments ON event_items.id = commitments.item_id
+    WHERE event_items.id = commitments.item_id
+    GROUP BY event_items.id
+  )
+);
+

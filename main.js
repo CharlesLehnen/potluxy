@@ -270,7 +270,7 @@ async function renderCommitmentForm() {
     return `
       <div>
         <strong>${item.item_name}</strong><br>
-        Required: ${item.quantity_required} | Total Committed: ${totalCommitted} | Your Commitment: 
+        Required: ${item.quantity_required} | Total Committed: ${totalCommitted} | Your Commitment: ${yourCommitment}
         <input type="number" id="commit-${item.id}" value="${yourCommitment}" min="0">
         | Remaining: ${remaining}
         <button onclick="commitItem('${item.id}')">Commit</button>
@@ -306,27 +306,45 @@ async function handleAddItem(e) {
 }
 
 async function updateItem(itemId) {
-  if (currentUser?.username !== currentEvent.created_by) {
-    alert("Only the event creator can update items.");
-    return;
-  }
-  const newItemName = document.getElementById(`edit-item-${itemId}`).value.trim();
-  const newQuantity = parseInt(document.getElementById(`edit-qty-${itemId}`).value);
-  if (!newItemName || newQuantity <= 0) {
-    alert("Please provide valid values.");
-    return;
-  }
-  const { error } = await supabase
-    .from('event_items')
-    .update({ item_name: newItemName, quantity_required: newQuantity })
-    .eq('id', itemId);
-  if (error) {
-    alert(`Error updating item: ${error.message}`);
-  } else {
-    alert("Item updated successfully!");
-    loadEvent(currentEvent.slug);
-  }
+    if (currentUser?.username !== currentEvent.created_by) {
+        alert("Only the event creator can update items.");
+        return;
+    }
+
+    const newItemName = document.getElementById(`edit-item-${itemId}`).value.trim();
+    const newQuantity = parseInt(document.getElementById(`edit-qty-${itemId}`).value);
+    if (!newItemName || newQuantity <= 0) {
+        alert("Please provide valid values.");
+        return;
+    }
+
+    // Get total committed so far
+    const { data: commitmentsData, error: commitmentsError } = await supabase
+        .from('commitments')
+        .select('quantity')
+        .eq('item_id', itemId);
+
+    const totalCommitted = commitmentsData?.reduce((sum, c) => sum + c.quantity, 0) || 0;
+
+    if (newQuantity < totalCommitted) {
+        alert(`Cannot reduce required quantity to ${newQuantity}. ${totalCommitted} already committed.`);
+        return;
+    }
+
+    // Update item quantity
+    const { error } = await supabase
+        .from('event_items')
+        .update({ item_name: newItemName, quantity_required: newQuantity })
+        .eq('id', itemId);
+
+    if (error) {
+        alert(`Error updating item: ${error.message}`);
+    } else {
+        alert("Item updated successfully!");
+        loadEvent(currentEvent.slug);
+    }
 }
+
 
 async function deleteItem(itemId) {
   if (currentUser?.username !== currentEvent.created_by) {
@@ -349,28 +367,59 @@ async function deleteItem(itemId) {
 }
 
 async function commitItem(itemId) {
-  const inputEl = document.getElementById(`commit-${itemId}`);
-  const quantity = parseInt(inputEl.value);
-  if (isNaN(quantity) || quantity < 0) {
-    alert("Please enter a valid number for commitment.");
-    return;
-  }
-  // Upsert commitment using onConflict.
-  const { error } = await supabase
-    .from('commitments')
-    .upsert([{
-      event_id: currentEvent.id,
-      user_id: currentUser.id,
-      item_id: itemId,
-      quantity
-    }], { onConflict: ['event_id', 'user_id', 'item_id'] });
-  if (error) {
-    alert(`Error committing item: ${error.message}`);
-  } else {
-    alert('Commitment successful!');
-    loadEvent(currentEvent.slug);
-  }
+    const inputEl = document.getElementById(`commit-${itemId}`);
+    const quantity = parseInt(inputEl.value);
+    if (isNaN(quantity) || quantity < 0) {
+        alert("Please enter a valid number for commitment.");
+        return;
+    }
+
+    // Get current item info
+    const { data: itemData, error: itemError } = await supabase
+        .from('event_items')
+        .select('quantity_required')
+        .eq('id', itemId)
+        .single();
+
+    if (itemError || !itemData) {
+        alert(`Error fetching item details: ${itemError?.message}`);
+        return;
+    }
+
+    const requiredQuantity = itemData.quantity_required;
+
+    // Get total committed so far
+    const { data: commitmentsData, error: commitmentsError } = await supabase
+        .from('commitments')
+        .select('quantity')
+        .eq('item_id', itemId);
+
+    const totalCommitted = commitmentsData?.reduce((sum, c) => sum + c.quantity, 0) || 0;
+    const available = requiredQuantity - (totalCommitted - (currentUser?.quantity || 0));  // Subtract user's current commitment
+
+    if (quantity > available) {
+        alert(`Cannot commit ${quantity}. Only ${available} slots are available.`);
+        return;
+    }
+
+    // Upsert commitment using onConflict.
+    const { error } = await supabase
+        .from('commitments')
+        .upsert([{
+            event_id: currentEvent.id,
+            user_id: currentUser.id,
+            item_id: itemId,
+            quantity
+        }], { onConflict: ['event_id', 'user_id', 'item_id'] });
+
+    if (error) {
+        alert(`Error committing item: ${error.message}`);
+    } else {
+        alert('Commitment successful!');
+        loadEvent(currentEvent.slug);
+    }
 }
+
 
 // ----------------------
 // 5. Helper: Attach Commit Listeners (stub)
