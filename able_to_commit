@@ -1,4 +1,27 @@
--- (Optional) Enable pgcrypto extension if not already enabled (for gen_random_uuid)
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Potlucky V1.2 - Easy Potluck Planning</title>
+  <!-- Include Supabase client library -->
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"></script>
+
+  <!-- Include the config file for Supabase keys -->
+  <script type="module" src="config.js"></script>
+
+  <!-- Link to external CSS -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Potlucky</h1>
+  <div id="app"></div>
+
+  <!-- Main JavaScript for the app -->
+  <script type="module" src="main.js"></script>
+</body>
+</html>
+
+
+-- Enable pgcrypto for UUID generation
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 ---------------------------
@@ -7,8 +30,8 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TABLE events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     event_name TEXT NOT NULL,
-    slug TEXT UNIQUE NOT NULL, -- friendly URL slug (generate using event_name + unique identifier)
-    created_by TEXT NOT NULL,  -- Username of the event creator
+    slug TEXT UNIQUE NOT NULL, -- friendly URL slug (generated from event_name + unique identifier)
+    created_by TEXT NOT NULL,  -- the username (from event_users) of the event creator
     created_at TIMESTAMPTZ DEFAULT now() NOT NULL
 );
 
@@ -25,13 +48,13 @@ CREATE TABLE event_items (
 );
 
 ---------------------------
--- 3. USERS TABLE (Per Event)
+-- 3. EVENT_USERS TABLE (Event-Specific Profiles)
 ---------------------------
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+-- This table links a global auth user (auth.users.uid) with an event.
+CREATE TABLE event_users (
+    id UUID PRIMARY KEY,  -- This should match the id in auth.users
     event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     username TEXT NOT NULL,
-    password_hash TEXT,  -- Store hashed password; can be NULL if no password provided
     created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
     UNIQUE(event_id, username)
 );
@@ -42,7 +65,7 @@ CREATE TABLE users (
 CREATE TABLE commitments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    user_id UUID REFERENCES event_users(id) ON DELETE SET NULL,
     item_id UUID NOT NULL REFERENCES event_items(id) ON DELETE CASCADE,
     quantity INT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
@@ -54,120 +77,85 @@ CREATE TABLE commitments (
 ---------------------------
 ALTER TABLE events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE event_users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE commitments ENABLE ROW LEVEL SECURITY;
 
 ---------------------------
 -- RLS Policies
 ---------------------------
 
--- EVENTS: Allow anyone to SELECT events (public view)
-CREATE POLICY "Public select on events"
-ON events FOR SELECT
-USING (true);
+-- EVENTS: Public SELECT and INSERT are allowed.
+CREATE POLICY "Public select on events" ON events FOR SELECT USING (true);
+CREATE POLICY "Public insert on events" ON events FOR INSERT WITH CHECK (true);
+-- Only allow UPDATE/DELETE if the current auth user is the creator.
+CREATE POLICY "Event update" ON events FOR UPDATE
+  USING (
+    EXISTS (
+      SELECT 1 FROM event_users
+      WHERE event_users.id = auth.uid()
+        AND event_users.event_id = events.id
+        AND event_users.username = events.created_by
+    )
+  );
+CREATE POLICY "Event delete" ON events FOR DELETE
+  USING (
+    EXISTS (
+      SELECT 1 FROM event_users
+      WHERE event_users.id = auth.uid()
+        AND event_users.event_id = events.id
+        AND event_users.username = events.created_by
+    )
+  );
 
--- Allow anyone to INSERT new events without authentication
-CREATE POLICY "Public insert on events"
-ON events FOR INSERT
-WITH CHECK (true);
-
--- Allow only the creator to UPDATE or DELETE their own event
-CREATE POLICY "Event creator can modify own events"
-ON events FOR UPDATE
-USING (
-  created_by = current_setting('request.jwt.claims', true)::jsonb->>'username'
+-- EVENT ITEMS: Public SELECT; for INSERT/UPDATE/DELETE, only allow if current user is the event creator.
+CREATE POLICY "Event items select" ON event_items FOR SELECT USING (
+  EXISTS (SELECT 1 FROM events WHERE events.id = event_items.event_id)
 );
+CREATE POLICY "Event items insert" ON event_items FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM event_users
+      WHERE event_users.id = auth.uid()
+        AND event_users.event_id = event_items.event_id
+        AND event_users.username = (SELECT created_by FROM events WHERE events.id = event_items.event_id)
+    )
+  );
+CREATE POLICY "Event items update" ON event_items FOR UPDATE
+  USING (
+    EXISTS (
+      SELECT 1 FROM event_users
+      WHERE event_users.id = auth.uid()
+        AND event_users.event_id = event_items.event_id
+        AND event_users.username = (SELECT created_by FROM events WHERE events.id = event_items.event_id)
+    )
+  );
+CREATE POLICY "Event items delete" ON event_items FOR DELETE
+  USING (
+    EXISTS (
+      SELECT 1 FROM event_users
+      WHERE event_users.id = auth.uid()
+        AND event_users.event_id = event_items.event_id
+        AND event_users.username = (SELECT created_by FROM events WHERE events.id = event_items.event_id)
+    )
+  );
 
-CREATE POLICY "Event creator can delete own events"
-ON events FOR DELETE
-USING (
-  created_by = current_setting('request.jwt.claims', true)::jsonb->>'username'
-);
+-- EVENT_USERS: A user can only select their own profile.
+CREATE POLICY "Event users select" ON event_users FOR SELECT
+  USING (id = auth.uid());
+-- Allow insert if the new profile’s id matches auth.uid()
+CREATE POLICY "Event users insert" ON event_users FOR INSERT
+  WITH CHECK (id = auth.uid());
 
--- EVENT ITEMS: Only the event creator can add/modify items
-CREATE POLICY "Event items select"
-ON event_items FOR SELECT
-USING (
-  EXISTS (
-    SELECT 1 FROM events
-    WHERE events.id = event_items.event_id
-  )
-);
+-- COMMITMENTS: Users may only access their own commitments.
+CREATE POLICY "Commitments select" ON commitments FOR SELECT
+  USING (user_id = auth.uid());
+CREATE POLICY "Commitments insert" ON commitments FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+CREATE POLICY "Commitments update" ON commitments FOR UPDATE
+  USING (user_id = auth.uid());
+CREATE POLICY "Commitments delete" ON commitments FOR DELETE
+  USING (user_id = auth.uid());
 
-CREATE POLICY "Event items insert"
-ON event_items FOR INSERT
-WITH CHECK (
-  EXISTS (
-    SELECT 1 FROM events
-    WHERE events.id = event_items.event_id
-  )
-);
-
-CREATE POLICY "Event items update"
-ON event_items FOR UPDATE
-USING (
-  EXISTS (
-    SELECT 1 FROM events
-    WHERE events.id = event_items.event_id
-    AND events.created_by = current_setting('request.jwt.claims', true)::jsonb->>'username'
-  )
-);
-
-CREATE POLICY "Event items delete"
-ON event_items FOR DELETE
-USING (
-  EXISTS (
-    SELECT 1 FROM events
-    WHERE events.id = event_items.event_id
-    AND events.created_by = current_setting('request.jwt.claims', true)::jsonb->>'username'
-  )
-);
-
--- USERS: Allow users to sign up and see their own user records
-CREATE POLICY "Users select"
-ON users FOR SELECT
-USING (true);
-
-CREATE POLICY "Users insert"
-ON users FOR INSERT
-WITH CHECK (true);
-
--- COMMITMENTS: Users can only see and edit their own commitments
-CREATE POLICY "Commitments select"
-ON commitments FOR SELECT
-USING (
-  EXISTS (
-    SELECT 1 FROM users
-    WHERE users.id = commitments.user_id
-  )
-);
-
-CREATE POLICY "Commitments insert"
-ON commitments FOR INSERT
-WITH CHECK (
-  EXISTS (
-    SELECT 1 FROM users
-    WHERE users.id = commitments.user_id
-  )
-);
-
-CREATE POLICY "Commitments update"
-ON commitments FOR UPDATE
-USING (
-  EXISTS (
-    SELECT 1 FROM users
-    WHERE users.id = commitments.user_id
-  )
-);
-
-CREATE POLICY "Commitments delete"
-ON commitments FOR DELETE
-USING (
-  EXISTS (
-    SELECT 1 FROM users
-    WHERE users.id = commitments.user_id
-  )
-);
 
 // Import Supabase client and config
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
@@ -176,12 +164,18 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 // Initialize Supabase client
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let currentEvent = null;
-let currentUser = JSON.parse(localStorage.getItem('currentUser')) || null;
+let currentUser = null; // This will be managed via supabase.auth
+
+// Utility: Construct event-specific email from username and event slug.
+function constructEmail(username, slug) {
+  // For example, if your domain is example.com, use:
+  return `${username}.${slug}@mailinator.com`;
+}
 
 // ----------------------
 // 1. Event Creation (for creators)
 // ----------------------
-function renderCreateEventForm() {
+async function renderCreateEventForm() {
   const app = document.getElementById('app');
   app.innerHTML = `
     <form id="eventForm">
@@ -203,70 +197,67 @@ function generateSlug(eventName) {
   return eventName.toLowerCase().replace(/\s+/g, '-') + '-' + uniqueId;
 }
 
-async function hashPassword(password) {
-  if (!password) return null;
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map(byte => byte.toString(16).padStart(2, '0'))
-    .join('');
-}
-
+// Ensure the user is authenticated before inserting into event_users
 async function createEvent(e) {
-  e.preventDefault();
-  const eventNameInput = document.getElementById('eventName');
-  const usernameInput = document.getElementById('username');
-  const passwordInput = document.getElementById('password');
+    e.preventDefault();
+    const eventName = document.getElementById('eventName').value.trim();
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value.trim();
+    const eventSlug = generateSlug(eventName);
+    const email = constructEmail(username, eventSlug);
 
-  if (!eventNameInput || !usernameInput) {
-    alert('Missing required form fields.');
-    return;
-  }
+    // 1. Sign up the user
+    const { data: authData, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password: password || 'no-password'
+    });
 
-  const eventName = eventNameInput.value.trim();
-  const username = usernameInput.value.trim();
-  const password = passwordInput?.value.trim() || '';
+    if (signUpError) {
+        alert(`Error signing up: ${signUpError.message}`);
+        return;
+    }
 
-  if (!eventName || !username) {
-    alert('Event name and username are required.');
-    return;
-  }
+    // 2. Ensure the user session is active
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !sessionData.session) {
+        alert('Error: User not fully authenticated after signup.');
+        return;
+    }
 
-  const slug = generateSlug(eventName);
-  const passwordHash = password ? await hashPassword(password) : null;
+    const userId = sessionData.session.user.id;
 
-  try {
-    // Create the event
+    // 3. Create the event
     const { data: eventData, error: eventError } = await supabase
-      .from('events')
-      .insert([{ event_name: eventName, slug, created_by: username }])
-      .select()
-      .single();
-    if (eventError) throw new Error(`Error creating event: ${eventError.message}`);
+        .from('events')
+        .insert([{ event_name: eventName, slug: eventSlug, created_by: username }])
+        .select()
+        .single();
+
+    if (eventError) {
+        alert(`Error creating event: ${eventError.message}`);
+        return;
+    }
+
     const eventId = eventData.id;
 
-    // Create the event creator's user record (and retrieve the full record)
-    const { data: newUser, error: userError } = await supabase
-      .from('users')
-      .insert([{ event_id: eventId, username, password_hash: passwordHash }])
-      .select()
-      .single();
-    if (userError) throw new Error(`Error creating user: ${userError.message}`);
-    currentUser = newUser;
-    localStorage.setItem('currentUser', JSON.stringify(currentUser));
+    // 4. Insert event user (linked to auth.uid())
+    const { data: profileData, error: profileError } = await supabase
+        .from('event_users')
+        .insert([{ id: userId, event_id: eventId, username }]);
 
-    alert(`Event created successfully! Share this link: ${location.origin}/event/${slug}`);
-    window.history.pushState({}, '', `/event/${slug}`);
-    loadEvent(slug);
-  } catch (error) {
-    console.error(error);
-    alert(error.message || 'Failed to create the event.');
-  }
+    if (profileError) {
+        alert(`Error creating event user: ${profileError.message}`);
+        return;
+    }
+
+    alert(`Event created successfully! Share this link: ${location.origin}/event/${eventSlug}`);
+    window.history.pushState({}, '', `/event/${eventSlug}`);
+    loadEvent(eventSlug);
 }
 
+
 // ----------------------
-// 2. Event Loading & Guest Login
+// 2. Event Loading & Login (Per Event)
 // ----------------------
 async function loadEvent(slug) {
   const { data: eventData, error: eventError } = await supabase
@@ -281,75 +272,92 @@ async function loadEvent(slug) {
   }
   currentEvent = eventData;
   currentEvent.items = eventData.event_items || [];
-  // If no user is logged in, show the login form for guests.
-  if (!currentUser) {
-    renderLoginForm();
+  
+  // Check Supabase Auth session.
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    renderLoginForm(slug);
   } else {
-    await renderEventDashboard();
+    // Fetch the event_users record for this user and event.
+    const { data: profileData } = await supabase
+      .from('event_users')
+      .select('*')
+      .eq('id', session.user.id)
+      .eq('event_id', currentEvent.id)
+      .single();
+    if (!profileData) {
+      // If no profile exists, you can create one now.
+      alert("No event-specific profile found; please sign up for this event.");
+      renderLoginForm(slug);
+    } else {
+      currentUser = profileData;
+      renderEventDashboard();
+    }
   }
 }
 
-function renderLoginForm() {
+function renderLoginForm(slug) {
   const app = document.getElementById('app');
   app.innerHTML = `
     <h2>${currentEvent.event_name}</h2>
     <form id="loginForm">
       <label for="username">Username:</label>
       <input type="text" id="username" required>
-      <label for="password">Password (if set):</label>
+      <label for="password">Password:</label>
       <input type="password" id="password">
       <button type="submit">Login / Sign Up</button>
     </form>
     <p>If you don't have an account for this event, signing up will create one.</p>
   `;
-  document.getElementById('loginForm').addEventListener('submit', handleLogin);
+  document.getElementById('loginForm').addEventListener('submit', (e) => handleLogin(e, slug));
 }
 
-async function handleLogin(e) {
+async function handleLogin(e, slug) {
   e.preventDefault();
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value.trim();
-  const passwordHash = password ? await hashPassword(password) : null;
-
-  const { data: userData, error: userError } = await supabase
-    .from('users')
+  const email = constructEmail(username, slug);
+  
+  // Sign in via Supabase Auth.
+  const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+    email, password: password || 'no-password'
+  });
+  if (signInError) {
+    alert(`Error signing in: ${signInError.message}`);
+    return;
+  }
+  // Fetch (or create) the event-specific profile.
+  const { data: profileData } = await supabase
+    .from('event_users')
     .select('*')
+    .eq('id', signInData.session.user.id)
     .eq('event_id', currentEvent.id)
-    .eq('username', username)
     .single();
-
-  if (userData) {
-    if (userData.password_hash && userData.password_hash !== passwordHash) {
-      alert('Incorrect password.');
-      return;
-    }
-    currentUser = userData;
-    localStorage.setItem('currentUser', JSON.stringify(currentUser));
-    await renderEventDashboard();
-  } else {
-    // Create a new user if one doesn't exist.
-    const { data: newUser, error: newUserError } = await supabase
-      .from('users')
-      .insert([{ event_id: currentEvent.id, username, password_hash: passwordHash }])
+  if (!profileData) {
+    // Create profile if it doesn't exist.
+    const { data: newProfile, error: newProfileError } = await supabase
+      .from('event_users')
+      .insert([{ id: signInData.session.user.id, event_id: currentEvent.id, username }])
       .select()
       .single();
-    if (newUserError) {
-      alert(`Error signing up: ${newUserError.message}`);
+    if (newProfileError) {
+      alert(`Error creating event user: ${newProfileError.message}`);
       return;
     }
-    currentUser = newUser;
-    localStorage.setItem('currentUser', JSON.stringify(currentUser));
-    await renderEventDashboard();
+    currentUser = newProfile;
+  } else {
+    currentUser = profileData;
   }
+  renderEventDashboard();
 }
 
 // ----------------------
 // 3. Event Dashboard & Detailed Commitment Display
+// (This section is similar to your existing code; the JWT is now managed by Supabase Auth.)
 // ----------------------
 async function renderEventDashboard() {
   const app = document.getElementById('app');
   const isCreator = currentUser?.username === currentEvent.created_by;
-  // Render the detailed commitment form.
   const commitmentFormHTML = await renderCommitmentForm();
   app.innerHTML = `
     <h2>${currentEvent.event_name}</h2>
@@ -400,7 +408,6 @@ function renderViewItems() {
 }
 
 async function renderCommitmentForm() {
-  // Query all commitments for the event.
   const { data: allCommitments } = await supabase
     .from('commitments')
     .select('*')
@@ -417,7 +424,7 @@ async function renderCommitmentForm() {
   }
   return currentEvent.items.map(item => {
     const totalCommitted = commitmentTotals[item.id] || 0;
-    const yourCommitment = userCommitments[item.id] || 0;
+    const yourCommitment = (userCommitments[item.id] === undefined) ? 0 : userCommitments[item.id];
     const remaining = item.quantity_required - totalCommitted;
     return `
       <div>
@@ -453,11 +460,15 @@ async function handleAddItem(e) {
     alert("Error adding item: " + error.message);
   } else {
     alert("Item added!");
-    await loadEvent(currentEvent.slug);
+    loadEvent(currentEvent.slug);
   }
 }
 
 async function updateItem(itemId) {
+  if (currentUser?.username !== currentEvent.created_by) {
+    alert("Only the event creator can update items.");
+    return;
+  }
   const newItemName = document.getElementById(`edit-item-${itemId}`).value.trim();
   const newQuantity = parseInt(document.getElementById(`edit-qty-${itemId}`).value);
   if (!newItemName || newQuantity <= 0) {
@@ -471,12 +482,19 @@ async function updateItem(itemId) {
   if (error) {
     alert(`Error updating item: ${error.message}`);
   } else {
-    alert("Item updated!");
-    await loadEvent(currentEvent.slug);
+    alert("Item updated successfully!");
+    loadEvent(currentEvent.slug);
   }
 }
 
 async function deleteItem(itemId) {
+  if (currentUser?.username !== currentEvent.created_by) {
+    alert("Only the event creator can delete items.");
+    return;
+  }
+  if (!confirm("Are you sure you want to delete this item? This cannot be undone.")) {
+    return;
+  }
   const { error } = await supabase
     .from('event_items')
     .delete()
@@ -484,38 +502,40 @@ async function deleteItem(itemId) {
   if (error) {
     alert(`Error deleting item: ${error.message}`);
   } else {
-    alert("Item deleted!");
-    await loadEvent(currentEvent.slug);
+    alert("Item deleted successfully!");
+    loadEvent(currentEvent.slug);
   }
 }
 
 async function commitItem(itemId) {
-  const quantity = parseInt(document.getElementById(`commit-${itemId}`).value);
-  // Allow zero or more as valid; upsert will insert or update.
-  if (quantity >= 0) {
-    const { error } = await supabase
-      .from('commitments')
-      .upsert([{ 
-        event_id: currentEvent.id,
-        user_id: currentUser.id,
-        item_id: itemId,
-        quantity
-      }]);
-    if (error) {
-      alert(`Error committing item: ${error.message}`);
-    } else {
-      alert('Commitment successful!');
-      await loadEvent(currentEvent.slug);
-    }
+  const inputEl = document.getElementById(`commit-${itemId}`);
+  const quantity = parseInt(inputEl.value);
+  if (isNaN(quantity) || quantity < 0) {
+    alert("Please enter a valid number for commitment.");
+    return;
+  }
+  // Upsert commitment using onConflict.
+  const { error } = await supabase
+    .from('commitments')
+    .upsert([{
+      event_id: currentEvent.id,
+      user_id: currentUser.id,
+      item_id: itemId,
+      quantity
+    }], { onConflict: ['event_id', 'user_id', 'item_id'] });
+  if (error) {
+    alert(`Error committing item: ${error.message}`);
+  } else {
+    alert('Commitment successful!');
+    loadEvent(currentEvent.slug);
   }
 }
 
 // ----------------------
-// 5. Helper: Attach Commit Listeners (stub in case extra wiring is needed)
+// 5. Helper: Attach Commit Listeners (stub)
 // ----------------------
 function attachCommitListeners() {
-  // Currently, our inline onclick handlers on commitment buttons handle commits.
-  // If additional wiring is needed, add it here.
+  // Inline onclicks in renderCommitmentForm handle commits.
 }
 
 // Expose functions so inline onclick attributes can find them.
@@ -526,34 +546,11 @@ window.commitItem = commitItem;
 // ----------------------
 // 6. App Initialization
 // ----------------------
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   const slug = window.location.pathname.split('/event/')[1];
   if (slug) {
-    loadEvent(slug);
+    await loadEvent(slug);
   } else {
     renderCreateEventForm();
   }
 });
-
-
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Potlucky V1.2 - Easy Potluck Planning</title>
-  <!-- Include Supabase client library -->
-  <script type="module" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"></script>
-
-  <!-- Include the config file for Supabase keys -->
-  <script type="module" src="config.js"></script>
-
-  <!-- Link to external CSS -->
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <h1>Potlucky</h1>
-  <div id="app"></div>
-
-  <!-- Main JavaScript for the app -->
-  <script type="module" src="main.js"></script>
-</body>
-</html>
