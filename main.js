@@ -20,18 +20,32 @@ async function renderCreateEventForm() {
   app.innerHTML = `
     <form id="eventForm" class="form">
       <h2>Create New Event</h2>
+      <br><br>
+
       <label for="eventName">Event Name:</label>
       <input type="text" id="eventName" required>
+      <br><br>
+
       <label for="eventDescription">Event Description (optional):</label>
       <textarea id="eventDescription" placeholder="Enter a description..."></textarea>
+      <br><br>
+
       <label for="eventDate">Event Date (optional):</label>
       <input type="date" id="eventDate">
+      <br><br>
+
       <label for="eventTime">Event Time (optional):</label>
       <input type="time" id="eventTime">
+      <br><br>
+
       <label for="username">Your Event Username:</label>
       <input type="text" id="username" required>
+      <br><br>
+
       <label for="password">Password (optional for editing):</label>
       <input type="password" id="password">
+      <br><br>
+
       <button type="submit">Create Event</button>
     </form>
   `;
@@ -238,11 +252,13 @@ async function renderEventDashboard() {
     <div class="dashboard">
       <div class="items">
         <h3>Items Needed</h3>
+        <br><br>
         ${isCreator ? renderManageItems() : renderViewItems()}
         ${isCreator ? commitmentBreakdownHTML : ''}
       </div>
       <div class="commitments">
         <h3>Your Commitments</h3>
+        <br><br>
         ${commitmentFormHTML}
       </div>
     </div>
@@ -308,12 +324,17 @@ async function renderCommitmentForm() {
     const remaining = item.quantity_required - totalCommitted;
     return `
       <div class="commitment-card">
-        <strong>${item.item_name}</strong><br>
-        Required: ${item.quantity_required} | Total Committed: ${totalCommitted} | Your Commitment: ${yourCommitment}
-        <input type="number" id="commit-${item.id}" value="${yourCommitment}" min="0">
-        | Remaining: ${remaining}
-        <button onclick="commitItem('${item.id}')">Commit</button>
-      </div>
+        <strong style="text-align: center; display: block;">${item.item_name}</strong>
+        <br><br>
+        <div>Required: ${item.quantity_required}</div>
+        <div>Total Committed: ${totalCommitted}</div>
+        <div>Your Commitment: ${yourCommitment}</div>
+        <div>
+            <input type="number" id="commit-${item.id}" value="${yourCommitment}" min="0">
+            Remaining: ${remaining}
+            <button onclick="commitItem('${item.id}')">Commit</button>
+        </div>
+    </div>
     `;
   }).join('');
 }

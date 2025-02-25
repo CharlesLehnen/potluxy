@@ -1,12 +1,48 @@
-body {
-  background: url('http://www.timurtek.com/wp-content/uploads/2014/10/form-bg.jpg') no-repeat center center fixed; 
-  background-size: cover;
-  font-family: 'HelveticaNeue', 'Arial', sans-serif;
-  margin: 0;
-  padding: 20px;
+* {
+  margin: 0 0;
+  padding: 0 0;
+  box-sizing: border-box;
 }
 
-h1, h2, h3 {
+
+html, body {
+  height: 100%;
+  width: 100%;
+  margin: 0 0;
+  padding: 0 0;
+  background-size: cover;
+  font-family: 'HelveticaNeue', 'Arial', sans-serif;
+  transition: background-color 0.5s ease;
+}
+
+h1 {
+  color: #2c3e50;
+  transition: color 0.5s ease;
+  text-align: center;
+  padding-top: 2.5vh;
+}
+
+#formWrapper {
+  height: 100vh; 
+  width: 100vw;  
+  margin: 0;
+  padding: 0;
+  background-color: rgba(0, 0, 0, 0.3); /* Or any background color you prefer */
+}
+
+
+/* Darkened background when focusing */
+#formWrapper.darken-bg {
+  background-color: rgb(117, 112, 112);
+}
+
+/* Logo active state */
+.logo-active h1 {
+  color: #44aacc;
+}
+
+
+h2, h3 {
   color: #2c3e50;
   text-align: center;
 }
