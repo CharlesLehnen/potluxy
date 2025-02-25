@@ -327,30 +327,43 @@ async function renderCommitmentForm() {
 
 // NEW: For creators, render a breakdown of who committed what.
 async function renderCommitmentBreakdown() {
-  // Query commitments joined with event_users to get usernames.
-  const { data: breakdownData, error } = await supabase
-    .from('commitments')
-    .select('quantity, item_id, event_users(username)')
-    .eq('event_id', currentEvent.id);
-  if (error) {
-    return `<p>Error loading commitment breakdown.</p>`;
-  }
-  // Group by item_id.
-  const breakdownByItem = {};
-  breakdownData.forEach(row => {
-    const itemId = row.item_id;
-    if (!breakdownByItem[itemId]) breakdownByItem[itemId] = [];
-    breakdownByItem[itemId].push(`${row.event_users.username}: ${row.quantity}`);
-  });
-  // Build HTML for each item.
-  let html = '<h4>Commitment Breakdown</h4>';
-  currentEvent.items.forEach(item => {
-    if (breakdownByItem[item.id]) {
-      html += `<p><strong>${item.item_name}:</strong> ${breakdownByItem[item.id].join(', ')}</p>`;
+    // First, fetch all event_users for the current event.
+    const { data: usersData, error: usersError } = await supabase
+      .from('event_users')
+      .select('id, username')
+      .eq('event_id', currentEvent.id);
+    const userLookup = {};
+    if (usersData) {
+      usersData.forEach(user => {
+        userLookup[user.id] = user.username;
+      });
     }
-  });
-  return html;
-}
+    // Now fetch all commitments for the event.
+    const { data: breakdownData, error } = await supabase
+      .from('commitments')
+      .select('quantity, item_id, user_id')
+      .eq('event_id', currentEvent.id);
+    if (error) {
+      return `<p>Error loading commitment breakdown.</p>`;
+    }
+    // Group commitments by item_id.
+    const breakdownByItem = {};
+    breakdownData.forEach(row => {
+      const itemId = row.item_id;
+      const username = userLookup[row.user_id] || "Unknown";
+      if (!breakdownByItem[itemId]) breakdownByItem[itemId] = [];
+      breakdownByItem[itemId].push(`${username}: ${row.quantity}`);
+    });
+    // Build HTML for each item.
+    let html = '<h4>Commitment Breakdown</h4>';
+    currentEvent.items.forEach(item => {
+      if (breakdownByItem[item.id]) {
+        html += `<p><strong>${item.item_name}:</strong> ${breakdownByItem[item.id].join(', ')}</p>`;
+      }
+    });
+    return html;
+  }
+  
 
 // ----------------------
 // 4. Item & Commitment Actions

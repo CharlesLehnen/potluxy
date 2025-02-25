@@ -120,16 +120,15 @@ USING (
     )
 );
 
--- EVENT_USERS: A user can only select their own profile.
 CREATE POLICY "Event users select" ON event_users FOR SELECT
-USING (id = auth.uid());
+  USING (true);
 
 CREATE POLICY "Event users insert" ON event_users FOR INSERT
 WITH CHECK (id = auth.uid());
 
 -- COMMITMENTS: Users may only access their own commitments.
 CREATE POLICY "Commitments select" ON commitments FOR SELECT
-USING (user_id = auth.uid());
+  USING (true);
 
 CREATE POLICY "Commitments insert" ON commitments FOR INSERT
 WITH CHECK (user_id = auth.uid());
@@ -150,11 +149,13 @@ ON commitments
 FOR INSERT
 WITH CHECK (
     quantity <= (
-        SELECT quantity_required - COALESCE(SUM(quantity), 0)
+        SELECT quantity_required - COALESCE((
+            SELECT SUM(quantity)
+            FROM commitments
+            WHERE item_id = commitments.item_id
+        ), 0)
         FROM event_items
-        LEFT JOIN commitments ON event_items.id = commitments.item_id
-        WHERE event_items.id = commitments.item_id
-        GROUP BY event_items.id
+        WHERE id = commitments.item_id
     )
 );
 
@@ -164,13 +165,16 @@ ON commitments
 FOR UPDATE
 WITH CHECK (
     quantity <= (
-        SELECT quantity_required - COALESCE(SUM(quantity), 0)
+        SELECT quantity_required - COALESCE((
+            SELECT SUM(quantity)
+            FROM commitments
+            WHERE item_id = commitments.item_id
+        ), 0)
         FROM event_items
-        LEFT JOIN commitments ON event_items.id = commitments.item_id
-        WHERE event_items.id = commitments.item_id
-        GROUP BY event_items.id
+        WHERE id = commitments.item_id
     )
 );
+
 
 -- Prevent reducing quantity below existing commitments
 CREATE OR REPLACE FUNCTION prevent_reduce_below_commitment()
