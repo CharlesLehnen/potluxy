@@ -9,7 +9,6 @@ let currentUser = null; // Managed via supabase.auth
 
 // Utility: Construct event-specific email from username and event slug.
 function constructEmail(username, slug) {
-  // For example, if your domain is mailinator.com
   return `${username}.${slug}@mailinator.com`;
 }
 
@@ -18,14 +17,13 @@ function constructEmail(username, slug) {
 // ----------------------
 async function renderCreateEventForm() {
   const app = document.getElementById('app');
-  // NEW: Add optional fields for event description, date, and time.
   app.innerHTML = `
-    <form id="eventForm">
+    <form id="eventForm" class="form">
       <h2>Create New Event</h2>
       <label for="eventName">Event Name:</label>
       <input type="text" id="eventName" required>
       <label for="eventDescription">Event Description (optional):</label>
-      <textarea id="eventDescription"></textarea>
+      <textarea id="eventDescription" placeholder="Enter a description..."></textarea>
       <label for="eventDate">Event Date (optional):</label>
       <input type="date" id="eventDate">
       <label for="eventTime">Event Time (optional):</label>
@@ -48,9 +46,9 @@ function generateSlug(eventName) {
 async function createEvent(e) {
   e.preventDefault();
   const eventName = document.getElementById('eventName').value.trim();
-  const eventDescription = document.getElementById('eventDescription').value.trim(); // NEW
-  const eventDate = document.getElementById('eventDate').value; // NEW
-  const eventTime = document.getElementById('eventTime').value; // NEW
+  const eventDescription = document.getElementById('eventDescription').value.trim();
+  const eventDate = document.getElementById('eventDate').value;
+  const eventTime = document.getElementById('eventTime').value;
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value.trim();
   if (!eventName || !username) {
@@ -77,16 +75,16 @@ async function createEvent(e) {
   }
   const userId = sessionData.session.user.id;
   
-  // Create the event including new optional fields.
+  // Create the event.
   const { data: eventData, error: eventError } = await supabase
     .from('events')
     .insert([{
       event_name: eventName,
       slug,
       created_by: username,
-      event_description: eventDescription || null, // NEW
-      event_date: eventDate || null,               // NEW
-      event_time: eventTime || null                // NEW
+      event_description: eventDescription || null,
+      event_date: eventDate || null,
+      event_time: eventTime || null
     }])
     .select()
     .single();
@@ -156,7 +154,7 @@ function renderLoginForm(slug) {
   const app = document.getElementById('app');
   app.innerHTML = `
     <h2>${currentEvent.event_name}</h2>
-    <form id="loginForm">
+    <form id="loginForm" class="form">
       <label for="username">Username:</label>
       <input type="text" id="username" required>
       <label for="password">Password:</label>
@@ -180,7 +178,6 @@ async function handleLogin(e, slug) {
     password: password || 'no-password'
   });
   if (signInError) {
-    // If the error indicates the user doesn't exist, try signing up.
     if (signInError.message.includes("Invalid login credentials")) {
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email, 
@@ -228,9 +225,7 @@ async function renderEventDashboard() {
   const app = document.getElementById('app');
   const isCreator = currentUser?.username === currentEvent.created_by;
   const commitmentFormHTML = await renderCommitmentForm();
-  // NEW: For creators, include a commitment breakdown.
   const commitmentBreakdownHTML = isCreator ? await renderCommitmentBreakdown() : '';
-  // Optionally, display event description/date/time.
   const eventInfoHTML = `
     ${currentEvent.event_description ? `<p>${currentEvent.event_description}</p>` : ''}
     ${currentEvent.event_date ? `<p>Date: ${currentEvent.event_date}</p>` : ''}
@@ -240,13 +235,13 @@ async function renderEventDashboard() {
   app.innerHTML = `
     <h2>${currentEvent.event_name}</h2>
     ${eventInfoHTML}
-    <div style="display: flex; gap: 20px;">
-      <div>
+    <div class="dashboard">
+      <div class="items">
         <h3>Items Needed</h3>
         ${isCreator ? renderManageItems() : renderViewItems()}
         ${isCreator ? commitmentBreakdownHTML : ''}
       </div>
-      <div>
+      <div class="commitments">
         <h3>Your Commitments</h3>
         ${commitmentFormHTML}
       </div>
@@ -262,20 +257,18 @@ function renderManageItems() {
   return `
     <div id="itemList">
       ${currentEvent.items.map(item => `
-        <div>
+        <div class="item-card">
           <input type="text" value="${item.item_name}" id="edit-item-${item.id}">
           <input type="number" value="${item.quantity_required}" id="edit-qty-${item.id}">
-          <!-- NEW: Optional item description input -->
           <input type="text" value="${item.item_description || ''}" id="edit-desc-${item.id}" placeholder="Item description (optional)">
           <button onclick="updateItem('${item.id}')">Update</button>
           <button onclick="deleteItem('${item.id}')">Delete</button>
         </div>
       `).join('')}
     </div>
-    <form id="addItemForm">
+    <form id="addItemForm" class="form">
       <input type="text" id="newItemName" placeholder="Item Name" required>
       <input type="number" id="newItemQuantity" placeholder="Quantity" min="1" required>
-      <!-- NEW: Optional item description input -->
       <input type="text" id="newItemDescription" placeholder="Item description (optional)">
       <button type="submit">Add Item</button>
     </form>
@@ -287,10 +280,10 @@ function renderViewItems() {
     return `<p>No items listed for this event yet.</p>`;
   }
   return currentEvent.items.map(item => `
-    <p>
-      ${item.item_name} - ${item.quantity_required} needed
-      ${item.item_description ? `<br><em>${item.item_description}</em>` : ''}
-    </p>
+    <div class="item-card">
+      <p>${item.item_name} - ${item.quantity_required} needed</p>
+      ${item.item_description ? `<p><em>${item.item_description}</em></p>` : ''}
+    </div>
   `).join('');
 }
 
@@ -314,7 +307,7 @@ async function renderCommitmentForm() {
     const yourCommitment = (userCommitments[item.id] === undefined) ? 0 : userCommitments[item.id];
     const remaining = item.quantity_required - totalCommitted;
     return `
-      <div>
+      <div class="commitment-card">
         <strong>${item.item_name}</strong><br>
         Required: ${item.quantity_required} | Total Committed: ${totalCommitted} | Your Commitment: ${yourCommitment}
         <input type="number" id="commit-${item.id}" value="${yourCommitment}" min="0">
@@ -325,45 +318,42 @@ async function renderCommitmentForm() {
   }).join('');
 }
 
-// NEW: For creators, render a breakdown of who committed what.
 async function renderCommitmentBreakdown() {
-    // First, fetch all event_users for the current event.
-    const { data: usersData, error: usersError } = await supabase
-      .from('event_users')
-      .select('id, username')
-      .eq('event_id', currentEvent.id);
-    const userLookup = {};
-    if (usersData) {
-      usersData.forEach(user => {
+  const { data: usersData } = await supabase
+    .from('event_users')
+    .select('id, username')
+    .eq('event_id', currentEvent.id);
+  const userLookup = {};
+  if (usersData) {
+    usersData.forEach(user => {
+      if (user && user.username) {
         userLookup[user.id] = user.username;
-      });
-    }
-    // Now fetch all commitments for the event.
-    const { data: breakdownData, error } = await supabase
-      .from('commitments')
-      .select('quantity, item_id, user_id')
-      .eq('event_id', currentEvent.id);
-    if (error) {
-      return `<p>Error loading commitment breakdown.</p>`;
-    }
-    // Group commitments by item_id.
-    const breakdownByItem = {};
-    breakdownData.forEach(row => {
-      const itemId = row.item_id;
-      const username = userLookup[row.user_id] || "Unknown";
-      if (!breakdownByItem[itemId]) breakdownByItem[itemId] = [];
-      breakdownByItem[itemId].push(`${username}: ${row.quantity}`);
-    });
-    // Build HTML for each item.
-    let html = '<h4>Commitment Breakdown</h4>';
-    currentEvent.items.forEach(item => {
-      if (breakdownByItem[item.id]) {
-        html += `<p><strong>${item.item_name}:</strong> ${breakdownByItem[item.id].join(', ')}</p>`;
       }
     });
-    return html;
   }
-  
+  const { data: breakdownData, error } = await supabase
+    .from('commitments')
+    .select('quantity, item_id, user_id')
+    .eq('event_id', currentEvent.id);
+  if (error) {
+    return `<p>Error loading commitment breakdown.</p>`;
+  }
+  const breakdownByItem = {};
+  breakdownData.forEach(row => {
+    if (!row) return;
+    const itemId = row.item_id;
+    const username = row.user_id ? (userLookup[row.user_id] || "Unknown") : "Unknown";
+    if (!breakdownByItem[itemId]) breakdownByItem[itemId] = [];
+    breakdownByItem[itemId].push(`${username}: ${row.quantity}`);
+  });
+  let html = '<h4>Commitment Breakdown</h4>';
+  currentEvent.items.forEach(item => {
+    if (breakdownByItem[item.id]) {
+      html += `<p><strong>${item.item_name}:</strong> ${breakdownByItem[item.id].join(', ')}</p>`;
+    }
+  });
+  return html;
+}
 
 // ----------------------
 // 4. Item & Commitment Actions
@@ -372,7 +362,7 @@ async function handleAddItem(e) {
   e.preventDefault();
   const newItemName = document.getElementById('newItemName').value.trim();
   const newItemQuantity = parseInt(document.getElementById('newItemQuantity').value);
-  const newItemDescription = document.getElementById('newItemDescription').value.trim(); // NEW
+  const newItemDescription = document.getElementById('newItemDescription').value.trim();
   if (!newItemName || newItemQuantity <= 0) {
     alert("Please provide a valid item name and quantity.");
     return;
@@ -408,7 +398,6 @@ async function updateItem(itemId) {
     alert("Please provide valid values.");
     return;
   }
-  // Get total committed so far
   const { data: commitmentsData } = await supabase
     .from('commitments')
     .select('quantity')
@@ -461,7 +450,6 @@ async function commitItem(itemId) {
     alert("Please enter a valid number for commitment.");
     return;
   }
-  // Get current item info
   const { data: itemData, error: itemError } = await supabase
     .from('event_items')
     .select('quantity_required')
@@ -472,13 +460,11 @@ async function commitItem(itemId) {
     return;
   }
   const requiredQuantity = itemData.quantity_required;
-  // Get total committed so far
   const { data: commitmentsData } = await supabase
     .from('commitments')
     .select('quantity')
     .eq('item_id', itemId);
   const totalCommitted = commitmentsData?.reduce((sum, c) => sum + c.quantity, 0) || 0;
-  // Get current user's existing commitment for this item.
   const { data: myCommitData } = await supabase
     .from('commitments')
     .select('quantity')
