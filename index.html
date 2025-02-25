@@ -1,21 +1,36 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Potlucky V1.2 - Easy Potluck Planning</title>
-  <!-- Include Supabase client library -->
+  <title>Potlucky V1.2 - Easy Potluck Planner</title>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script type="module" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"></script>
-
-  <!-- Include the config file for Supabase keys -->
   <script type="module" src="config.js"></script>
-
-  <!-- Link to external CSS -->
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>Potlucky</h1>
-  <div id="app"></div>
+  <div id="formWrapper">
+    <div class="logo">
+      <h1>Potlucky&trade;</h1>
+    </div>
+    <div id="app">
+      <form id="loginForm" class="form">
+        <div class="form-item">
+          <p class="formLabel">Username</p>
+          <input type="text" id="username" class="form-style" autocomplete="off" required>
+        </div>
+        <div class="form-item">
+          <p class="formLabel">Password</p>
+          <input type="password" id="password" class="form-style" required>
+        </div>
+        <div class="form-item">
+          <button type="submit" class="login">Log In</button>
+        </div>
+      </form>
+    </div>
+    <footer>&copy; 2025 Potlucky. All rights reserved.</footer>
+  </div>
 
-  <!-- Main JavaScript for the app -->
   <script type="module" src="main.js"></script>
+  <script src="style.js"></script>
 </body>
 </html>
