@@ -1,11 +1,30 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Potluxy - Easy Potluck Planner</title>
-  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-  <script type="module" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"></script>
-  <script type="module" src="config.js"></script>
-  <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Potluxy is the easiest way to plan group events. Coordinate items for potlucks, beach outings, game nights, and more with ease.">
+  <meta name="keywords" content="event planning, potluck planner, group coordination, party planning, dinner party, board game night, Friendsgiving, team events, shared items">
+  <meta name="author" content="Potluxy Team">
+  <meta name="robots" content="index, follow">
+  
+  <!-- Social Media Sharing (Open Graph) -->
+  <meta property="og:title" content="Potluxy - Simplify Your Group Event Planning">
+  <meta property="og:description" content="Plan potlucks, beach days, game nights, and any group event effortlessly with Potluxy. Organize items and track contributions with ease.">
+  <meta property="og:image" content="https://example.com/images/preview.png">
+  <meta property="og:url" content="https://www.potluxy.com">
+  <meta property="og:type" content="website">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Potluxy - Plan Your Group Events Effortlessly">
+  <meta name="twitter:description" content="Organize any event where multiple people bring items. Perfect for potlucks, beach outings, board game nights, and more.">
+  <meta name="twitter:image" content="https://example.com/images/preview.png">
+  
+  <title>Potluxy - Easy Event Planning for Any Gathering</title>
+
+  <!-- Favicon -->
+  <link rel="icon" href="/favicon.ico" type="image/x-icon">
 
   <!-- Google Translate API -->
   <script type="text/javascript">
@@ -16,40 +35,77 @@
       );
     }
   </script>
-  <script type="text/javascript" src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
+  <script src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
 
   <!-- Google Adsense -->
-  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9283020036917902"
-     crossorigin="anonymous"></script>
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9283020036917902" crossorigin="anonymous"></script>
 
+  <!-- jQuery and Supabase -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"></script>
+  <script type="module" src="config.js"></script>
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
   <!-- Google Translate Widget -->
   <div id="google_translate_element" class="translate-widget"></div>
 
-
+  <!-- Main Wrapper -->
   <div id="formWrapper">
-    <div class="logo">
+    <header class="logo">
       <h1>Potluxy&trade;</h1>
-    </div>
-    <div id="app">
-      <form id="loginForm" class="form">
-        <div class="form-item">
-          <p class="formLabel">Username</p>
-          <input type="text" id="username" class="form-style" autocomplete="off" required>
-        </div>
-        <div class="form-item">
-          <p class="formLabel">Password</p>
-          <input type="password" id="password" class="form-style" required>
-        </div>
-        <div class="form-item">
-          <button type="submit" class="login">Log In</button>
-        </div>
-      </form>
-    </div>
-    <footer>&copy; 2025 Potluxy. All rights reserved.</footer>
+      <p style = "opacity: 0;">Your ultimate tool to organize items for any group event.</p>
+    </header>
+
+    <main id="app">
+      <section aria-label="User Login Form">
+        <h2>Get Started with Your Event</h2>
+        <form id="loginForm" class="form" method="post" action="#">
+          <div class="form-item">
+            <label for="username" class="formLabel">Username</label>
+            <input type="text" id="username" class="form-style" autocomplete="off" required aria-required="true">
+          </div>
+
+          <div class="form-item">
+            <label for="password" class="formLabel">Password</label>
+            <input type="password" id="password" class="form-style" required aria-required="true">
+          </div>
+
+          <div class="form-item">
+            <button type="submit" class="login">Log In</button>
+          </div>
+        </form>
+      </section>
+
+      <section aria-label="How It Works">
+        <h2>How It Works</h2>
+        <ul>
+          <li>Create an event for your group gathering.</li>
+          <li>List items needed (food, supplies, etc.).</li>
+          <li>Guests can commit to bringing what they choose.</li>
+          <li>Track everything in one convenient place!</li>
+        </ul>
+      </section>
+
+      <!-- AdSense Ad Slot -->
+      <aside>
+      </aside>
+    </main>
+
+    <footer>
+      <p>&copy; 2025 Potluxy. All rights reserved.</p>
+      <nav>
+        <a href="/privacy-policy.html">Privacy Policy</a> | 
+        <a href="/terms-of-service.html">Terms of Service</a> | 
+        <a href="/contact.html">Contact Us</a>
+      </nav>
+    </footer>
   </div>
 
+  <!-- JavaScript -->
   <script type="module" src="main.js"></script>
   <script src="style.js"></script>
 </body>

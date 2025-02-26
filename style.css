@@ -106,10 +106,17 @@ button:hover {
 /* Google Translate Widget Styling */
 .translate-widget {
   background-color: rgba(255, 255, 255, 0.9);
-  padding: 10px 0; /* Remove horizontal padding */
+  padding: 2.5vh 3vw 2.5vh 0; /* Add right padding */
   margin: 0;
   border-radius: 0; /* Ensure no rounded corners */
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
   transition: background-color 0.5s ease;
   width: 100vw; /* Full width of viewport */
+  text-align: right; /* Right justify the content */
 }
+
+footer {
+  padding-left: 20px;
+  padding-bottom: 20px;
+}
+
