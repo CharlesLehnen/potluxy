@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Potlucked - Easy Potluck Planner</title>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"></script>
+  <script type="module" src="config.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="formWrapper">
+    <div class="logo">
+      <h1>Potlucked&trade;</h1>
+    </div>
+    <div id="app">
+      <form id="loginForm" class="form">
+        <div class="form-item">
+          <p class="formLabel">Username</p>
+          <input type="text" id="username" class="form-style" autocomplete="off" required>
+        </div>
+        <div class="form-item">
+          <p class="formLabel">Password</p>
+          <input type="password" id="password" class="form-style" required>
+        </div>
+        <div class="form-item">
+          <button type="submit" class="login">Log In</button>
+        </div>
+      </form>
+    </div>
+    <footer>&copy; 2025 Potlucked. All rights reserved.</footer>
+  </div>
+
+  <script type="module" src="main.js"></script>
+  <script src="style.js"></script>
+</body>
+</html>
+
+* {
+  margin: 0 0;
+  padding: 0 0;
+  box-sizing: border-box;
+}
+
+
+html, body {
+  /* height: 100%;
+  width: 100%; */
+  margin: 0 0;
+  padding: 0 0;
+  background-size: cover;
+  font-family: 'HelveticaNeue', 'Arial', sans-serif;
+  transition: background-color 0.5s ease;
+}
+
+h1 {
+  color: #2c3e50;
+  transition: color 0.5s ease;
+  text-align: center;
+  padding-top: 2.5vh;
+}
+
+#formWrapper {
+  /* height: 100vh; 
+  width: 100vw;   */
+  margin: 0;
+  padding: 0;
+  background-color: rgba(0, 0, 0, 0.3); /* Or any background color you prefer */
+}
+
+
+/* Darkened background when focusing */
+#formWrapper.darken-bg {
+  background-color: rgb(117, 112, 112);
+}
+
+/* Logo active state */
+.logo-active h1 {
+  color: #44aacc;
+}
+
+
+h2, h3 {
+  color: #2c3e50;
+  text-align: center;
+}
+
+.form {
+  background: rgba(255,255,255,0.9);
+  padding: 20px;
+  border-radius: 5px;
+  max-width: 360px;
+  margin: 30px auto;
+  box-shadow: 0 0 10px rgba(0,0,0,0.2);
+}
+
+.dashboard {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  justify-content: center;
+}
+
+.items, .commitments {
+  background: rgba(255,255,255,0.95);
+  padding: 20px;
+  border-radius: 5px;
+  flex: 1;
+  min-width: 300px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.2);
+}
+
+.item-card, .commitment-card {
+  background: #fff;
+  padding: 10px;
+  margin-bottom: 10px;
+  border-radius: 5px;
+  box-shadow: 0 0 5px rgba(0,0,0,0.1);
+}
+
+input[type="text"], input[type="number"], input[type="password"], textarea {
+  width: 100%;
+  padding: 8px;
+  margin-top: 5px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+button {
+  background-color: #3498db;
+  color: #fff;
+  padding: 10px 15px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 10px;
+}
+
+button:hover {
+  background-color: #2980b9;
+}
+
+
+$(document).ready(function () {
+    const formInputs = $('input[type="text"], input[type="password"], input[type="date"], input[type="time"], textarea');
+
+    formInputs.focus(function () {
+        $(this).parent().children('p.formLabel').addClass('formTop');
+        $('#formWrapper').addClass('darken-bg');
+        $('.logo').addClass('logo-active');
+
+        // Change background and h1 color on focus
+        $('body').css('background-color', '#333');
+        $('h1').css('color', '#44aacc');
+    });
+
+    formInputs.focusout(function () {
+        if ($.trim($(this).val()).length === 0) {
+            $(this).parent().children('p.formLabel').removeClass('formTop');
+        }
+        $('#formWrapper').removeClass('darken-bg');
+        $('.logo').removeClass('logo-active');
+
+        // Revert background and h1 color on focusout
+        $('body').css('background-color', '');
+        $('h1').css('color', '#2c3e50');
+    });
+
+    $('p.formLabel').click(function () {
+        $(this).parent().children('.form-style').focus();
+    });
+});
+
+

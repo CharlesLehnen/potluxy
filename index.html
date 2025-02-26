@@ -1,16 +1,32 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Potlucky V1.2 - Easy Potluck Planner</title>
+  <title>Potluxy - Easy Potluck Planner</title>
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script type="module" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"></script>
   <script type="module" src="config.js"></script>
   <link rel="stylesheet" href="style.css">
+
+  <!-- Google Translate API -->
+  <script type="text/javascript">
+    function googleTranslateElementInit() {
+      new google.translate.TranslateElement(
+        { pageLanguage: 'en', includedLanguages: 'es,fr,de,zh,hi,ar', layout: google.translate.TranslateElement.InlineLayout.SIMPLE },
+        'google_translate_element'
+      );
+    }
+  </script>
+  <script type="text/javascript" src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
+
 </head>
 <body>
+  <!-- Google Translate Widget -->
+  <div id="google_translate_element" class="translate-widget"></div>
+
+
   <div id="formWrapper">
     <div class="logo">
-      <h1>Potlucky&trade;</h1>
+      <h1>Potluxy&trade;</h1>
     </div>
     <div id="app">
       <form id="loginForm" class="form">
@@ -27,7 +43,7 @@
         </div>
       </form>
     </div>
-    <footer>&copy; 2025 Potlucky. All rights reserved.</footer>
+    <footer>&copy; 2025 Potluxy. All rights reserved.</footer>
   </div>
 
   <script type="module" src="main.js"></script>
