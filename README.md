@@ -1,6 +1,6 @@
-# Potlucky
+# Potluxy™
 
-Potlucky is a simple, intuitive web application designed for organizing potlucks or any events where multiple participants sign up to bring various items. Inspired by the straightforward interface of when2meet.com, Potlucky is built for ease of use with no sign-ups required. Optional event-specific passwords allow users to edit their entries later if needed.
+Potluxy is a simple, intuitive web application designed for organizing potlucks or any events where multiple participants sign up to bring various items. Inspired by the straightforward interface of when2meet.com, Potluxy is built for ease of use with no sign-ups required. Optional event-specific passwords allow users to edit their entries later if needed.
 
 ## How It Works
 
@@ -16,7 +16,7 @@ This project is licensed under the BSD 3-Clause License. See the LICENSE file fo
 If you use this project in formal or professional settings, please cite it appropriately:
 
 # Example Citation:
-Lehnen, Charles (2024). “Potlucky”. GitHub repository. https://github.com/CharlesLehnen/potlucky
+Lehnen, Charles (2024). “Potluxy”. GitHub repository. https://github.com/CharlesLehnen/Potluxy
 
 # BibTeX:
 ```
