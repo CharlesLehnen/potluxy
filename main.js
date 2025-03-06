@@ -1,11 +1,24 @@
-// Import Supabase client and config
+// Import Supabase client
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
-// Initialize Supabase client
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Global variables (will be initialized after fetching credentials)
+let supabase;
 let currentEvent = null;
 let currentUser = null; // Managed via supabase.auth
+
+// Function to initialize Supabase client by securely fetching credentials from the Edge Function
+async function initializeSupabaseClient() {
+  const EDGE_FUNCTION_URL = "https://your-project-ref.supabase.co/functions/v1/getKeys";
+  try {
+    const response = await fetch(EDGE_FUNCTION_URL);
+    if (!response.ok) throw new Error("Failed to fetch Supabase keys");
+    const { SUPABASE_URL, SUPABASE_ANON_KEY } = await response.json();
+    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    console.log("Supabase initialized securely.");
+  } catch (error) {
+    console.error("Error initializing Supabase:", error);
+  }
+}
 
 // Utility: Construct event-specific email from username and event slug.
 function constructEmail(username, slug) {
@@ -334,7 +347,7 @@ async function renderCommitmentForm() {
             Remaining: ${remaining}
             <button onclick="commitItem('${item.id}')">Commit</button>
         </div>
-    </div>
+      </div>
     `;
   }).join('');
 }
@@ -530,6 +543,7 @@ window.commitItem = commitItem;
 // 6. App Initialization with Hash Routing
 // ----------------------
 window.addEventListener('DOMContentLoaded', async () => {
+  await initializeSupabaseClient();
   let slug = null;
   if (window.location.hash && window.location.hash.startsWith("#/event/")) {
     slug = window.location.hash.split("#/event/")[1];
