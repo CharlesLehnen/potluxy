@@ -1,39 +1,331 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Potlucked - Easy Potluck Planner</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Potluxy is the easiest way to plan group events. Coordinate items for potlucks, beach outings, game nights, and more with ease.">
+  <meta name="keywords" content="event planning, potluck planner, group coordination, party planning, dinner party, board game night, Friendsgiving, team events, shared items">
+  <meta name="author" content="Potluxy Team">
+  <meta name="robots" content="index, follow">
+  
+  <!-- Social Media Sharing (Open Graph) -->
+  <meta property="og:title" content="Potluxy - Simplify Your Group Event Planning">
+  <meta property="og:description" content="Plan potlucks, beach days, game nights, and any group event effortlessly with Potluxy. Organize items and track contributions with ease.">
+  <meta property="og:image" content="https://example.com/images/preview.png">
+  <meta property="og:url" content="https://www.potluxy.com">
+  <meta property="og:type" content="website">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Potluxy - Plan Your Group Events Effortlessly">
+  <meta name="twitter:description" content="Organize any event where multiple people bring items. Perfect for potlucks, beach outings, board game nights, and more.">
+  <meta name="twitter:image" content="https://example.com/images/preview.png">
+  
+  <title>Potluxy - Easy Event Planning for Any Gathering</title>
+
+  <!-- Favicon -->
+  <link rel="icon" href="/favicon.ico" type="image/x-icon">
+
+  <!-- Google Translate API -->
+  <script type="text/javascript">
+    function googleTranslateElementInit() {
+      new google.translate.TranslateElement(
+        { pageLanguage: 'en', includedLanguages: 'es,fr,de,zh,hi,ar', layout: google.translate.TranslateElement.InlineLayout.SIMPLE },
+        'google_translate_element'
+      );
+    }
+  </script>
+  <script src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
+
+  <!-- Google Adsense -->
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9283020036917902" crossorigin="anonymous"></script>
+
+  <!-- Google Consent Mode -->
+  <script async src="https://fundingchoicesmessages.google.com/i/pub-9283020036917902?ers=1" nonce="YOUR_NONCE_HERE"></script>
+  <script nonce="YOUR_NONCE_HERE">
+    (function () {
+      window.googletag = window.googletag || { cmd: [] };
+      googletag.cmd.push(function () {
+        googletag.pubads().setPrivacySettings({
+          'consentRequired': true,
+        });
+      });
+    })();
+  </script>
+
+  <!-- jQuery and Supabase -->
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script type="module" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"></script>
   <script type="module" src="config.js"></script>
+
+  <!-- Stylesheet -->
   <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
+  <!-- Google Translate Widget -->
+  <div id="google_translate_element" class="translate-widget"></div>
+
+  <!-- Main Wrapper -->
   <div id="formWrapper">
-    <div class="logo">
-      <h1>Potlucked&trade;</h1>
-    </div>
-    <div id="app">
-      <form id="loginForm" class="form">
-        <div class="form-item">
-          <p class="formLabel">Username</p>
-          <input type="text" id="username" class="form-style" autocomplete="off" required>
-        </div>
-        <div class="form-item">
-          <p class="formLabel">Password</p>
-          <input type="password" id="password" class="form-style" required>
-        </div>
-        <div class="form-item">
-          <button type="submit" class="login">Log In</button>
-        </div>
-      </form>
-    </div>
-    <footer>&copy; 2025 Potlucked. All rights reserved.</footer>
+    <header class="logo">
+      <h1>Potluxy&trade;</h1>
+      <p style = "opacity: 0;">Your ultimate tool to organize items for any group event.</p>
+    </header>
+
+    <main id="app">
+      <section aria-label="User Login Form">
+        <h2>Get Started with Your Event</h2>
+        <form id="loginForm" class="form" method="post" action="#">
+          <div class="form-item">
+            <label for="username" class="formLabel">Username</label>
+            <input type="text" id="username" class="form-style" autocomplete="off" required aria-required="true">
+          </div>
+
+          <div class="form-item">
+            <label for="password" class="formLabel">Password</label>
+            <input type="password" id="password" class="form-style" required aria-required="true">
+          </div>
+
+          <div class="form-item">
+            <button type="submit" class="login">Log In</button>
+          </div>
+        </form>
+      </section>
+
+      <section aria-label="How It Works">
+        <h2>How It Works</h2>
+        <ul>
+          <li>Create an event for your group gathering.</li>
+          <li>List items needed (food, supplies, etc.).</li>
+          <li>Guests can commit to bringing what they choose.</li>
+          <li>Track everything in one convenient place!</li>
+        </ul>
+      </section>
+
+      <!-- AdSense Ad Slot -->
+      <aside>
+      </aside>
+    </main>
+
+    <footer>
+      <p>&copy; 2025 Potluxy. All rights reserved.</p>
+      <nav>
+        <a href="/privacy-policy.html">Privacy Policy</a> | 
+        <a href="/terms-of-service.html">Terms of Service</a> | 
+        <a href="/contact.html">Contact Us</a>
+      </nav>
+    </footer>
   </div>
 
+  <!-- JavaScript -->
   <script type="module" src="main.js"></script>
   <script src="style.js"></script>
 </body>
 </html>
+
+-- Enable pgcrypto for UUID generation
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+---------------------------
+-- 1. EVENTS TABLE
+---------------------------
+CREATE TABLE events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_name TEXT NOT NULL,
+    slug TEXT UNIQUE NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+    event_description TEXT,
+    event_date DATE,
+    event_time TIME
+);
+
+---------------------------
+-- 2. EVENT ITEMS TABLE
+---------------------------
+CREATE TABLE event_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    item_name TEXT NOT NULL,
+    quantity_required INT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+    item_description TEXT,
+    UNIQUE(event_id, item_name)
+);
+
+---------------------------
+-- 3. EVENT_USERS TABLE (Event-Specific Profiles)
+---------------------------
+CREATE TABLE event_users (
+    id UUID PRIMARY KEY,
+    event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    username TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+    UNIQUE(event_id, username)
+);
+
+---------------------------
+-- 4. COMMITMENTS TABLE (User Commitments)
+---------------------------
+CREATE TABLE commitments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES event_users(id) ON DELETE SET NULL,
+    item_id UUID NOT NULL REFERENCES event_items(id) ON DELETE CASCADE,
+    quantity INT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+    UNIQUE(event_id, user_id, item_id)
+);
+
+---------------------------
+-- Enable Row Level Security (RLS)
+---------------------------
+ALTER TABLE events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE event_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE event_users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE commitments ENABLE ROW LEVEL SECURITY;
+
+---------------------------
+-- RLS Policies
+---------------------------
+
+-- EVENTS: Public SELECT and INSERT are allowed.
+CREATE POLICY "Public select on events" ON events FOR SELECT USING (true);
+CREATE POLICY "Public insert on events" ON events FOR INSERT WITH CHECK (true);
+
+-- Only allow UPDATE/DELETE if the current auth user is the creator.
+CREATE POLICY "Event update" ON events FOR UPDATE
+USING (
+    EXISTS (
+        SELECT 1 FROM event_users
+        WHERE event_users.id = auth.uid()
+        AND event_users.event_id = events.id
+        AND event_users.username = events.created_by
+    )
+);
+CREATE POLICY "Event delete" ON events FOR DELETE
+USING (
+    EXISTS (
+        SELECT 1 FROM event_users
+        WHERE event_users.id = auth.uid()
+        AND event_users.event_id = events.id
+        AND event_users.username = events.created_by
+    )
+);
+
+-- EVENT ITEMS: Public SELECT; for INSERT/UPDATE/DELETE, only allow if current user is the event creator.
+CREATE POLICY "Event items select" ON event_items FOR SELECT USING (
+    EXISTS (SELECT 1 FROM events WHERE events.id = event_items.event_id)
+);
+CREATE POLICY "Event items insert" ON event_items FOR INSERT
+WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM event_users
+        WHERE event_users.id = auth.uid()
+        AND event_users.event_id = event_items.event_id
+        AND event_users.username = (SELECT created_by FROM events WHERE events.id = event_items.event_id)
+    )
+);
+CREATE POLICY "Event items update" ON event_items FOR UPDATE
+USING (
+    EXISTS (
+        SELECT 1 FROM event_users
+        WHERE event_users.id = auth.uid()
+        AND event_users.event_id = event_items.event_id
+        AND event_users.username = (SELECT created_by FROM events WHERE events.id = event_items.event_id)
+    )
+);
+CREATE POLICY "Event items delete" ON event_items FOR DELETE
+USING (
+    EXISTS (
+        SELECT 1 FROM event_users
+        WHERE event_users.id = auth.uid()
+        AND event_users.event_id = event_items.event_id
+        AND event_users.username = (SELECT created_by FROM events WHERE events.id = event_items.event_id)
+    )
+);
+
+CREATE POLICY "Event users select" ON event_users FOR SELECT
+  USING (true);
+
+CREATE POLICY "Event users insert" ON event_users FOR INSERT
+WITH CHECK (id = auth.uid());
+
+-- COMMITMENTS: Users may only access their own commitments.
+CREATE POLICY "Commitments select" ON commitments FOR SELECT
+  USING (true);
+
+CREATE POLICY "Commitments insert" ON commitments FOR INSERT
+WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Commitments update" ON commitments FOR UPDATE
+USING (user_id = auth.uid());
+
+CREATE POLICY "Commitments delete" ON commitments FOR DELETE
+USING (user_id = auth.uid());
+
+---------------------------
+-- Additional Constraints
+---------------------------
+
+-- Prevent overcommitments on INSERT
+CREATE POLICY "Prevent overcommitments on insert"
+ON commitments
+FOR INSERT
+WITH CHECK (
+    quantity <= (
+        SELECT quantity_required - COALESCE((
+            SELECT SUM(quantity)
+            FROM commitments
+            WHERE item_id = commitments.item_id
+        ), 0)
+        FROM event_items
+        WHERE id = commitments.item_id
+    )
+);
+
+-- Prevent overcommitments on UPDATE
+CREATE POLICY "Prevent overcommitments on update"
+ON commitments
+FOR UPDATE
+WITH CHECK (
+    quantity <= (
+        SELECT quantity_required - COALESCE((
+            SELECT SUM(quantity)
+            FROM commitments
+            WHERE item_id = commitments.item_id
+        ), 0)
+        FROM event_items
+        WHERE id = commitments.item_id
+    )
+);
+
+
+-- Prevent reducing quantity below existing commitments
+CREATE OR REPLACE FUNCTION prevent_reduce_below_commitment()
+RETURNS TRIGGER AS $$
+DECLARE
+    total_committed INT;
+BEGIN
+    SELECT COALESCE(SUM(quantity), 0)
+    INTO total_committed
+    FROM commitments
+    WHERE item_id = NEW.id;
+
+    IF NEW.quantity_required < total_committed THEN
+        RAISE EXCEPTION 'Cannot reduce required quantity below existing commitments (%).', total_committed;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger to enforce the above constraint
+CREATE TRIGGER prevent_reduce_below_commitment_trigger
+BEFORE UPDATE ON event_items
+FOR EACH ROW
+EXECUTE FUNCTION prevent_reduce_below_commitment();
 
 * {
   margin: 0 0;
@@ -56,7 +348,7 @@ h1 {
   color: #2c3e50;
   transition: color 0.5s ease;
   text-align: center;
-  padding-top: 2.5vh;
+  padding-top: 3vh;
 }
 
 #formWrapper {
@@ -140,35 +432,624 @@ button:hover {
   background-color: #2980b9;
 }
 
+/* Google Translate Widget Styling */
+.translate-widget {
+  background-color: rgba(255, 255, 255, 0.9);
+  padding: 2.5vh 3vw 2.5vh 0; /* Add right padding */
+  margin: 0;
+  border-radius: 0; /* Ensure no rounded corners */
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+  transition: background-color 0.5s ease;
+  width: 100vw; /* Full width of viewport */
+  text-align: right; /* Right justify the content */
+}
+
+footer {
+  padding-left: 20px;
+  padding-bottom: 20px;
+}
+
 
 $(document).ready(function () {
     const formInputs = $('input[type="text"], input[type="password"], input[type="date"], input[type="time"], textarea');
 
     formInputs.focus(function () {
-        $(this).parent().children('p.formLabel').addClass('formTop');
         $('#formWrapper').addClass('darken-bg');
-        $('.logo').addClass('logo-active');
-
-        // Change background and h1 color on focus
-        $('body').css('background-color', '#333');
+        $('#google_translate_element').css({
+            'background-color': 'rgb(117, 112, 112)',
+            'border-radius': '0',  // Ensure no rounded corners when darkened
+            'width': '100vw'
+        });
         $('h1').css('color', '#44aacc');
     });
 
     formInputs.focusout(function () {
-        if ($.trim($(this).val()).length === 0) {
-            $(this).parent().children('p.formLabel').removeClass('formTop');
-        }
         $('#formWrapper').removeClass('darken-bg');
-        $('.logo').removeClass('logo-active');
-
-        // Revert background and h1 color on focusout
-        $('body').css('background-color', '');
+        $('#google_translate_element').css({
+            'background-color': 'rgba(255, 255, 255, 0.9)',
+            'border-radius': '0',
+            'width': '100vw'
+        });
         $('h1').css('color', '#2c3e50');
-    });
-
-    $('p.formLabel').click(function () {
-        $(this).parent().children('.form-style').focus();
     });
 });
 
+// Import Supabase client
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
+// Global variables (will be initialized after fetching credentials)
+let supabase;
+let currentEvent = null;
+let currentUser = null; // Managed via supabase.auth
+
+// Function to initialize Supabase client by securely fetching credentials from the Edge Function
+async function initializeSupabaseClient() {
+  const EDGE_FUNCTION_URL = "https://your-project-ref.supabase.co/functions/v1/getKeys";
+  try {
+    const response = await fetch(EDGE_FUNCTION_URL);
+    if (!response.ok) throw new Error("Failed to fetch Supabase keys");
+    const { SUPABASE_URL, SUPABASE_ANON_KEY } = await response.json();
+    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    console.log("Supabase initialized securely.");
+  } catch (error) {
+    console.error("Error initializing Supabase:", error);
+  }
+}
+
+// Utility: Construct event-specific email from username and event slug.
+function constructEmail(username, slug) {
+  return `${username}.${slug}@mailinator.com`;
+}
+
+// ----------------------
+// 1. Event Creation (for creators)
+// ----------------------
+async function renderCreateEventForm() {
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <form id="eventForm" class="form">
+      <h2>Create New Event</h2>
+      <br><br>
+
+      <label for="eventName">Event Name:</label>
+      <input type="text" id="eventName" required>
+      <br><br>
+
+      <label for="eventDescription">Event Description (optional):</label>
+      <textarea id="eventDescription" placeholder="Enter a description..."></textarea>
+      <br><br>
+
+      <label for="eventDate">Event Date (optional):</label>
+      <input type="date" id="eventDate">
+      <br><br>
+
+      <label for="eventTime">Event Time (optional):</label>
+      <input type="time" id="eventTime">
+      <br><br>
+
+      <label for="username">Your Event Username:</label>
+      <input type="text" id="username" required>
+      <br><br>
+
+      <label for="password">Password (optional for editing):</label>
+      <input type="password" id="password">
+      <br><br>
+
+      <button type="submit">Create Event</button>
+    </form>
+  `;
+  document.getElementById('eventForm').addEventListener('submit', createEvent);
+}
+
+function generateSlug(eventName) {
+  const uniqueId = Math.random().toString(36).substring(2, 10);
+  return eventName.toLowerCase().replace(/\s+/g, '-') + '-' + uniqueId;
+}
+
+async function createEvent(e) {
+  e.preventDefault();
+  const eventName = document.getElementById('eventName').value.trim();
+  const eventDescription = document.getElementById('eventDescription').value.trim();
+  const eventDate = document.getElementById('eventDate').value;
+  const eventTime = document.getElementById('eventTime').value;
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value.trim();
+  if (!eventName || !username) {
+    alert('Event name and username are required.');
+    return;
+  }
+  const slug = generateSlug(eventName);
+  const email = constructEmail(username, slug);
+  
+  // Sign up via Supabase Auth.
+  const { data: authData, error: signUpError } = await supabase.auth.signUp({
+    email,
+    password: password || 'no-password'
+  });
+  if (signUpError) {
+    alert(`Error signing up: ${signUpError.message}`);
+    return;
+  }
+  
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !sessionData.session) {
+    alert('Error: User not fully authenticated after signup.');
+    return;
+  }
+  const userId = sessionData.session.user.id;
+  
+  // Create the event.
+  const { data: eventData, error: eventError } = await supabase
+    .from('events')
+    .insert([{
+      event_name: eventName,
+      slug,
+      created_by: username,
+      event_description: eventDescription || null,
+      event_date: eventDate || null,
+      event_time: eventTime || null
+    }])
+    .select()
+    .single();
+  if (eventError) {
+    alert(`Error creating event: ${eventError.message}`);
+    return;
+  }
+  
+  const eventId = eventData.id;
+  
+  // Create event-specific profile.
+  const { data: profileData, error: profileError } = await supabase
+    .from('event_users')
+    .insert([{ id: userId, event_id: eventId, username }])
+    .select()
+    .single();
+  if (profileError) {
+    alert(`Error creating event user: ${profileError.message}`);
+    return;
+  }
+  currentUser = profileData;
+  
+  alert(`Event created successfully! Share this link: ${location.origin}/#/event/${slug}`);
+  window.location.hash = `#/event/${slug}`;
+  loadEvent(slug);
+}
+
+// ----------------------
+// 2. Event Loading & Login (Per Event)
+// ----------------------
+async function loadEvent(slug) {
+  const { data: eventData, error: eventError } = await supabase
+    .from('events')
+    .select('*, event_items(*)')
+    .eq('slug', slug)
+    .single();
+  if (eventError || !eventData) {
+    alert('Event not found.');
+    renderCreateEventForm();
+    return;
+  }
+  currentEvent = eventData;
+  currentEvent.items = eventData.event_items || [];
+  
+  // Check Supabase Auth session.
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    renderLoginForm(slug);
+  } else {
+    const { data: profileData } = await supabase
+      .from('event_users')
+      .select('*')
+      .eq('id', session.user.id)
+      .eq('event_id', currentEvent.id)
+      .single();
+    if (!profileData) {
+      alert("No event-specific profile found; please sign up for this event.");
+      renderLoginForm(slug);
+    } else {
+      currentUser = profileData;
+      renderEventDashboard();
+    }
+  }
+}
+
+function renderLoginForm(slug) {
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <h2>${currentEvent.event_name}</h2>
+    <form id="loginForm" class="form">
+      <label for="username">Username:</label>
+      <input type="text" id="username" required>
+      <label for="password">Password:</label>
+      <input type="password" id="password">
+      <button type="submit">Login / Sign Up</button>
+    </form>
+    <p>If you don't have an account for this event, signing up will create one.</p>
+  `;
+  document.getElementById('loginForm').addEventListener('submit', (e) => handleLogin(e, slug));
+}
+
+async function handleLogin(e, slug) {
+  e.preventDefault();
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value.trim();
+  const email = constructEmail(username, slug);
+  
+  // Attempt to sign in
+  let { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+    email, 
+    password: password || 'no-password'
+  });
+  if (signInError) {
+    if (signInError.message.includes("Invalid login credentials")) {
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email, 
+        password: password || 'no-password'
+      });
+      if (signUpError) {
+        alert(`Error signing up: ${signUpError.message}`);
+        return;
+      }
+      signInData = signUpData;
+    } else {
+      alert(`Error signing in: ${signInError.message}`);
+      return;
+    }
+  }
+  
+  // Fetch (or create) the event-specific profile.
+  const { data: profileData } = await supabase
+    .from('event_users')
+    .select('*')
+    .eq('id', signInData.session.user.id)
+    .eq('event_id', currentEvent.id)
+    .single();
+  if (!profileData) {
+    const { data: newProfile, error: newProfileError } = await supabase
+      .from('event_users')
+      .insert([{ id: signInData.session.user.id, event_id: currentEvent.id, username }])
+      .select()
+      .single();
+    if (newProfileError) {
+      alert(`Error creating event user: ${newProfileError.message}`);
+      return;
+    }
+    currentUser = newProfile;
+  } else {
+    currentUser = profileData;
+  }
+  renderEventDashboard();
+}
+
+// ----------------------
+// 3. Event Dashboard & Detailed Commitment Display
+// ----------------------
+async function renderEventDashboard() {
+  const app = document.getElementById('app');
+  const isCreator = currentUser?.username === currentEvent.created_by;
+  const commitmentFormHTML = await renderCommitmentForm();
+  const commitmentBreakdownHTML = isCreator ? await renderCommitmentBreakdown() : '';
+  const eventInfoHTML = `
+    ${currentEvent.event_description ? `<p>${currentEvent.event_description}</p>` : ''}
+    ${currentEvent.event_date ? `<p>Date: ${currentEvent.event_date}</p>` : ''}
+    ${currentEvent.event_time ? `<p>Time: ${new Date('1970-01-01T' + currentEvent.event_time + 'Z').toLocaleTimeString()}</p>` : ''}
+  `;
+  
+  app.innerHTML = `
+    <h2>${currentEvent.event_name}</h2>
+    ${eventInfoHTML}
+    <div class="dashboard">
+      <div class="items">
+        <h3>Items Needed</h3>
+        <br><br>
+        ${isCreator ? renderManageItems() : renderViewItems()}
+        ${isCreator ? commitmentBreakdownHTML : ''}
+      </div>
+      <div class="commitments">
+        <h3>Your Commitments</h3>
+        <br><br>
+        ${commitmentFormHTML}
+      </div>
+    </div>
+  `;
+  if (isCreator) {
+    document.getElementById('addItemForm')?.addEventListener('submit', handleAddItem);
+  }
+  attachCommitListeners();
+}
+
+function renderManageItems() {
+  return `
+    <div id="itemList">
+      ${currentEvent.items.map(item => `
+        <div class="item-card">
+          <input type="text" value="${item.item_name}" id="edit-item-${item.id}">
+          <input type="number" value="${item.quantity_required}" id="edit-qty-${item.id}">
+          <input type="text" value="${item.item_description || ''}" id="edit-desc-${item.id}" placeholder="Item description (optional)">
+          <button onclick="updateItem('${item.id}')">Update</button>
+          <button onclick="deleteItem('${item.id}')">Delete</button>
+        </div>
+      `).join('')}
+    </div>
+    <form id="addItemForm" class="form">
+      <input type="text" id="newItemName" placeholder="Item Name" required>
+      <input type="number" id="newItemQuantity" placeholder="Quantity" min="1" required>
+      <input type="text" id="newItemDescription" placeholder="Item description (optional)">
+      <button type="submit">Add Item</button>
+    </form>
+  `;
+}
+
+function renderViewItems() {
+  if (!currentEvent.items || currentEvent.items.length === 0) {
+    return `<p>No items listed for this event yet.</p>`;
+  }
+  return currentEvent.items.map(item => `
+    <div class="item-card">
+      <p>${item.item_name} - ${item.quantity_required} needed</p>
+      ${item.item_description ? `<p><em>${item.item_description}</em></p>` : ''}
+    </div>
+  `).join('');
+}
+
+async function renderCommitmentForm() {
+  const { data: allCommitments } = await supabase
+    .from('commitments')
+    .select('*')
+    .eq('event_id', currentEvent.id);
+  const commitmentTotals = {};
+  const userCommitments = {};
+  if (allCommitments) {
+    allCommitments.forEach(commit => {
+      commitmentTotals[commit.item_id] = (commitmentTotals[commit.item_id] || 0) + commit.quantity;
+      if (currentUser && commit.user_id === currentUser.id) {
+        userCommitments[commit.item_id] = commit.quantity;
+      }
+    });
+  }
+  return currentEvent.items.map(item => {
+    const totalCommitted = commitmentTotals[item.id] || 0;
+    const yourCommitment = (userCommitments[item.id] === undefined) ? 0 : userCommitments[item.id];
+    const remaining = item.quantity_required - totalCommitted;
+    return `
+      <div class="commitment-card">
+        <strong style="text-align: center; display: block;">${item.item_name}</strong>
+        <br><br>
+        <div>Required: ${item.quantity_required}</div>
+        <div>Total Committed: ${totalCommitted}</div>
+        <div>Your Commitment: ${yourCommitment}</div>
+        <div>
+            <input type="number" id="commit-${item.id}" value="${yourCommitment}" min="0">
+            Remaining: ${remaining}
+            <button onclick="commitItem('${item.id}')">Commit</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function renderCommitmentBreakdown() {
+  const { data: usersData } = await supabase
+    .from('event_users')
+    .select('id, username')
+    .eq('event_id', currentEvent.id);
+  const userLookup = {};
+  if (usersData) {
+    usersData.forEach(user => {
+      if (user && user.username) {
+        userLookup[user.id] = user.username;
+      }
+    });
+  }
+  const { data: breakdownData, error } = await supabase
+    .from('commitments')
+    .select('quantity, item_id, user_id')
+    .eq('event_id', currentEvent.id);
+  if (error) {
+    return `<p>Error loading commitment breakdown.</p>`;
+  }
+  const breakdownByItem = {};
+  breakdownData.forEach(row => {
+    if (!row) return;
+    const itemId = row.item_id;
+    const username = row.user_id ? (userLookup[row.user_id] || "Unknown") : "Unknown";
+    if (!breakdownByItem[itemId]) breakdownByItem[itemId] = [];
+    breakdownByItem[itemId].push(`${username}: ${row.quantity}`);
+  });
+  let html = '<h4>Commitment Breakdown</h4>';
+  currentEvent.items.forEach(item => {
+    if (breakdownByItem[item.id]) {
+      html += `<p><strong>${item.item_name}:</strong> ${breakdownByItem[item.id].join(', ')}</p>`;
+    }
+  });
+  return html;
+}
+
+// ----------------------
+// 4. Item & Commitment Actions
+// ----------------------
+async function handleAddItem(e) {
+  e.preventDefault();
+  const newItemName = document.getElementById('newItemName').value.trim();
+  const newItemQuantity = parseInt(document.getElementById('newItemQuantity').value);
+  const newItemDescription = document.getElementById('newItemDescription').value.trim();
+  if (!newItemName || newItemQuantity <= 0) {
+    alert("Please provide a valid item name and quantity.");
+    return;
+  }
+  const insertData = {
+    event_id: currentEvent.id,
+    item_name: newItemName,
+    quantity_required: newItemQuantity
+  };
+  if (newItemDescription) {
+    insertData.item_description = newItemDescription;
+  }
+  const { error } = await supabase
+    .from('event_items')
+    .insert([insertData]);
+  if (error) {
+    alert("Error adding item: " + error.message);
+  } else {
+    alert("Item added!");
+    loadEvent(currentEvent.slug);
+  }
+}
+
+async function updateItem(itemId) {
+  if (currentUser?.username !== currentEvent.created_by) {
+    alert("Only the event creator can update items.");
+    return;
+  }
+  const newItemName = document.getElementById(`edit-item-${itemId}`).value.trim();
+  const newQuantity = parseInt(document.getElementById(`edit-qty-${itemId}`).value);
+  const newDescription = document.getElementById(`edit-desc-${itemId}`)?.value.trim();
+  if (!newItemName || newQuantity <= 0) {
+    alert("Please provide valid values.");
+    return;
+  }
+  const { data: commitmentsData } = await supabase
+    .from('commitments')
+    .select('quantity')
+    .eq('item_id', itemId);
+  const totalCommitted = commitmentsData?.reduce((sum, c) => sum + c.quantity, 0) || 0;
+  if (newQuantity < totalCommitted) {
+    alert(`Cannot reduce required quantity to ${newQuantity}. ${totalCommitted} already committed.`);
+    return;
+  }
+  const updateData = { item_name: newItemName, quantity_required: newQuantity };
+  if (newDescription !== undefined) {
+    updateData.item_description = newDescription;
+  }
+  const { error } = await supabase
+    .from('event_items')
+    .update(updateData)
+    .eq('id', itemId);
+  if (error) {
+    alert(`Error updating item: ${error.message}`);
+  } else {
+    alert("Item updated successfully!");
+    loadEvent(currentEvent.slug);
+  }
+}
+
+async function deleteItem(itemId) {
+  if (currentUser?.username !== currentEvent.created_by) {
+    alert("Only the event creator can delete items.");
+    return;
+  }
+  if (!confirm("Are you sure you want to delete this item? This cannot be undone.")) {
+    return;
+  }
+  const { error } = await supabase
+    .from('event_items')
+    .delete()
+    .eq('id', itemId);
+  if (error) {
+    alert(`Error deleting item: ${error.message}`);
+  } else {
+    alert("Item deleted successfully!");
+    loadEvent(currentEvent.slug);
+  }
+}
+
+async function commitItem(itemId) {
+  const inputEl = document.getElementById(`commit-${itemId}`);
+  const quantity = parseInt(inputEl.value);
+  if (isNaN(quantity) || quantity < 0) {
+    alert("Please enter a valid number for commitment.");
+    return;
+  }
+  const { data: itemData, error: itemError } = await supabase
+    .from('event_items')
+    .select('quantity_required')
+    .eq('id', itemId)
+    .single();
+  if (itemError || !itemData) {
+    alert(`Error fetching item details: ${itemError?.message}`);
+    return;
+  }
+  const requiredQuantity = itemData.quantity_required;
+  const { data: commitmentsData } = await supabase
+    .from('commitments')
+    .select('quantity')
+    .eq('item_id', itemId);
+  const totalCommitted = commitmentsData?.reduce((sum, c) => sum + c.quantity, 0) || 0;
+  const { data: myCommitData } = await supabase
+    .from('commitments')
+    .select('quantity')
+    .eq('item_id', itemId)
+    .eq('user_id', currentUser.id)
+    .single();
+  const myCurrent = myCommitData ? myCommitData.quantity : 0;
+  const available = requiredQuantity - (totalCommitted - myCurrent);
+  if (quantity > available) {
+    alert(`Cannot commit ${quantity}. Only ${available} slots are available.`);
+    return;
+  }
+  const { error } = await supabase
+    .from('commitments')
+    .upsert([{
+      event_id: currentEvent.id,
+      user_id: currentUser.id,
+      item_id: itemId,
+      quantity
+    }], { onConflict: ['event_id', 'user_id', 'item_id'] });
+  if (error) {
+    alert(`Error committing item: ${error.message}`);
+  } else {
+    alert('Commitment successful!');
+    loadEvent(currentEvent.slug);
+  }
+}
+
+// ----------------------
+// 5. Helper: Attach Commit Listeners (stub)
+// ----------------------
+function attachCommitListeners() {
+  // Inline onclicks in renderCommitmentForm handle commits.
+}
+
+// Expose functions so inline onclick attributes can find them.
+window.updateItem = updateItem;
+window.deleteItem = deleteItem;
+window.commitItem = commitItem;
+
+// ----------------------
+// 6. App Initialization with Hash Routing
+// ----------------------
+window.addEventListener('DOMContentLoaded', async () => {
+  await initializeSupabaseClient();
+  let slug = null;
+  if (window.location.hash && window.location.hash.startsWith("#/event/")) {
+    slug = window.location.hash.split("#/event/")[1];
+  }
+  if (slug) {
+    await loadEvent(slug);
+  } else {
+    renderCreateEventForm();
+  }
+});
+
+supabase/functions/fetchData/index.ts
+
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+serve(async (req) => {
+  // Initialize Supabase client securely on the server
+  const supabase = createClient(
+    Deno.env.get("PROJECT_URL")!, 
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")! 
+  );
+
+  const { data, error } = await supabase.from("events").select("*");
+
+  if (error) {
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  }
+
+  return new Response(JSON.stringify(data), {
+    headers: { "Content-Type": "application/json" }
+  });
+});
