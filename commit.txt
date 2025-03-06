@@ -1,62 +1,10 @@
-In powershell:
+conda create --name potluxy-django python=3.10
 
-https://scoop.sh/
+pip install django djangorestframework django-environ
 
-https://supabase.com/docs/guides/local-development/cli/getting-started?queryGroups=platform&platform=windows
+django-admin startproject backend
 
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+cd backend
 
-Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
-
-scoop bucket add supabase https://github.com/supabase/scoop-bucket.git
-
-scoop install supabase
-
-cd to project root directory
-
-supabase functions new fetchData
-
-then edit the new supabase/functions/fetchData/index.ts file:
-
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-serve(async (req) => {
-  // Initialize Supabase client (server-side, no public keys exposed!)
-  const supabase = createClient(
-    Deno.env.get("PROJECT_URL")!, // Fetch URL from environment variable
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")! // Secure private key
-  );
-
-  // Fetch events from Supabase
-  const { data, error } = await supabase.from("events").select("*");
-
-  if (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
-  }
-
-  return new Response(JSON.stringify(data), {
-    headers: { "Content-Type": "application/json" }
-  });
-});
-
-then on supabase online
-
-Project Settings > Data API 
-copy the SUPABSE_URL
-
-Project Settings > Edge Functions > Secrets
-Paste those with names that match your index.ts file (PROJECT_URL)
-
-go to: https://supabase.com/dashboard/account/tokens
-
-generate a new token GITHUB_SECRET
-
-create file:
-.github/workflows/deploy-edge-function.yml
-
-then on Github online in your repo 
-Settings > Secrets and Variables > Actions > add new Secrets
-SUPABASE_ACCESS_TOKEN and paste the token GITHUB_SECRET you generated above
-
+django-admin startapp api
 
