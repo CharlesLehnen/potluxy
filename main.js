@@ -1,26 +1,11 @@
-// Import Supabase client
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+// main.js
 
-// Global variables (will be initialized after fetching credentials)
-let supabase;
+// No direct Supabase client initialization here.
+// All calls are made via secure API endpoints (handled by Django/Edge Functions).
 let currentEvent = null;
-let currentUser = null; // Managed via supabase.auth
+let currentUser = null; // Managed via server-side sessions
 
-// Function to initialize Supabase client by securely fetching credentials from the Edge Function
-async function initializeSupabaseClient() {
-  const EDGE_FUNCTION_URL = "https://your-project-ref.supabase.co/functions/v1/getKeys";
-  try {
-    const response = await fetch(EDGE_FUNCTION_URL);
-    if (!response.ok) throw new Error("Failed to fetch Supabase keys");
-    const { SUPABASE_URL, SUPABASE_ANON_KEY } = await response.json();
-    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    console.log("Supabase initialized securely.");
-  } catch (error) {
-    console.error("Error initializing Supabase:", error);
-  }
-}
-
-// Utility: Construct event-specific email from username and event slug.
+// Utility: Construct an event-specific email (used only for authentication on the backend)
 function constructEmail(username, slug) {
   return `${username}.${slug}@mailinator.com`;
 }
@@ -33,32 +18,18 @@ async function renderCreateEventForm() {
   app.innerHTML = `
     <form id="eventForm" class="form">
       <h2>Create New Event</h2>
-      <br><br>
-
       <label for="eventName">Event Name:</label>
       <input type="text" id="eventName" required>
-      <br><br>
-
       <label for="eventDescription">Event Description (optional):</label>
       <textarea id="eventDescription" placeholder="Enter a description..."></textarea>
-      <br><br>
-
       <label for="eventDate">Event Date (optional):</label>
       <input type="date" id="eventDate">
-      <br><br>
-
       <label for="eventTime">Event Time (optional):</label>
       <input type="time" id="eventTime">
-      <br><br>
-
       <label for="username">Your Event Username:</label>
       <input type="text" id="username" required>
-      <br><br>
-
       <label for="password">Password (optional for editing):</label>
       <input type="password" id="password">
-      <br><br>
-
       <button type="submit">Create Event</button>
     </form>
   `;
@@ -85,54 +56,30 @@ async function createEvent(e) {
   const slug = generateSlug(eventName);
   const email = constructEmail(username, slug);
   
-  // Sign up via Supabase Auth.
-  const { data: authData, error: signUpError } = await supabase.auth.signUp({
-    email,
-    password: password || 'no-password'
-  });
-  if (signUpError) {
-    alert(`Error signing up: ${signUpError.message}`);
-    return;
-  }
-  
-  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError || !sessionData.session) {
-    alert('Error: User not fully authenticated after signup.');
-    return;
-  }
-  const userId = sessionData.session.user.id;
-  
-  // Create the event.
-  const { data: eventData, error: eventError } = await supabase
-    .from('events')
-    .insert([{
+  // POST to your secure backend endpoint for event creation.
+  const response = await fetch('/api/create_event/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
       event_name: eventName,
-      slug,
-      created_by: username,
+      slug: slug,
       event_description: eventDescription || null,
       event_date: eventDate || null,
-      event_time: eventTime || null
-    }])
-    .select()
-    .single();
-  if (eventError) {
-    alert(`Error creating event: ${eventError.message}`);
+      event_time: eventTime || null,
+      username: username,
+      password: password || 'no-password',
+      email: email
+    })
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    alert(`Error creating event: ${result.error}`);
     return;
   }
   
-  const eventId = eventData.id;
-  
-  // Create event-specific profile.
-  const { data: profileData, error: profileError } = await supabase
-    .from('event_users')
-    .insert([{ id: userId, event_id: eventId, username }])
-    .select()
-    .single();
-  if (profileError) {
-    alert(`Error creating event user: ${profileError.message}`);
-    return;
-  }
-  currentUser = profileData;
+  // The backend returns the created event and user profile.
+  currentEvent = result.event;
+  currentUser = result.profile;
   
   alert(`Event created successfully! Share this link: ${location.origin}/#/event/${slug}`);
   window.location.hash = `#/event/${slug}`;
@@ -143,35 +90,31 @@ async function createEvent(e) {
 // 2. Event Loading & Login (Per Event)
 // ----------------------
 async function loadEvent(slug) {
-  const { data: eventData, error: eventError } = await supabase
-    .from('events')
-    .select('*, event_items(*)')
-    .eq('slug', slug)
-    .single();
-  if (eventError || !eventData) {
+  // Call your backend endpoint to load event details (with event items).
+  const response = await fetch(`/api/load_event/?slug=${encodeURIComponent(slug)}`);
+  const result = await response.json();
+  if (!response.ok) {
     alert('Event not found.');
     renderCreateEventForm();
     return;
   }
-  currentEvent = eventData;
-  currentEvent.items = eventData.event_items || [];
+  currentEvent = result.event;
+  // currentEvent.items should be included from the backend.
   
-  // Check Supabase Auth session.
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) {
+  // Check session status via your backend.
+  const sessionResponse = await fetch('/api/get_session/');
+  const sessionResult = await sessionResponse.json();
+  if (!sessionResult.session) {
     renderLoginForm(slug);
   } else {
-    const { data: profileData } = await supabase
-      .from('event_users')
-      .select('*')
-      .eq('id', session.user.id)
-      .eq('event_id', currentEvent.id)
-      .single();
-    if (!profileData) {
+    // Fetch the event-specific profile for the logged-in user.
+    const profileResponse = await fetch(`/api/get_profile/?event_id=${currentEvent.id}`);
+    const profileResult = await profileResponse.json();
+    if (!profileResult.profile) {
       alert("No event-specific profile found; please sign up for this event.");
       renderLoginForm(slug);
     } else {
-      currentUser = profileData;
+      currentUser = profileResult.profile;
       renderEventDashboard();
     }
   }
@@ -199,49 +142,19 @@ async function handleLogin(e, slug) {
   const password = document.getElementById('password').value.trim();
   const email = constructEmail(username, slug);
   
-  // Attempt to sign in
-  let { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-    email, 
-    password: password || 'no-password'
+  // Send a POST request to your backend login endpoint.
+  const response = await fetch('/api/login/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password: password || 'no-password', email, slug })
   });
-  if (signInError) {
-    if (signInError.message.includes("Invalid login credentials")) {
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-        email, 
-        password: password || 'no-password'
-      });
-      if (signUpError) {
-        alert(`Error signing up: ${signUpError.message}`);
-        return;
-      }
-      signInData = signUpData;
-    } else {
-      alert(`Error signing in: ${signInError.message}`);
-      return;
-    }
+  const result = await response.json();
+  if (!response.ok) {
+    alert(`Error signing in: ${result.error}`);
+    return;
   }
   
-  // Fetch (or create) the event-specific profile.
-  const { data: profileData } = await supabase
-    .from('event_users')
-    .select('*')
-    .eq('id', signInData.session.user.id)
-    .eq('event_id', currentEvent.id)
-    .single();
-  if (!profileData) {
-    const { data: newProfile, error: newProfileError } = await supabase
-      .from('event_users')
-      .insert([{ id: signInData.session.user.id, event_id: currentEvent.id, username }])
-      .select()
-      .single();
-    if (newProfileError) {
-      alert(`Error creating event user: ${newProfileError.message}`);
-      return;
-    }
-    currentUser = newProfile;
-  } else {
-    currentUser = profileData;
-  }
+  currentUser = result.profile;
   renderEventDashboard();
 }
 
@@ -265,13 +178,11 @@ async function renderEventDashboard() {
     <div class="dashboard">
       <div class="items">
         <h3>Items Needed</h3>
-        <br><br>
         ${isCreator ? renderManageItems() : renderViewItems()}
         ${isCreator ? commitmentBreakdownHTML : ''}
       </div>
       <div class="commitments">
         <h3>Your Commitments</h3>
-        <br><br>
         ${commitmentFormHTML}
       </div>
     </div>
@@ -317,23 +228,20 @@ function renderViewItems() {
 }
 
 async function renderCommitmentForm() {
-  const { data: allCommitments } = await supabase
-    .from('commitments')
-    .select('*')
-    .eq('event_id', currentEvent.id);
+  const response = await fetch(`/api/commitments/?event_id=${currentEvent.id}`);
+  const result = await response.json();
+  const allCommitments = result.commitments || [];
   const commitmentTotals = {};
   const userCommitments = {};
-  if (allCommitments) {
-    allCommitments.forEach(commit => {
-      commitmentTotals[commit.item_id] = (commitmentTotals[commit.item_id] || 0) + commit.quantity;
-      if (currentUser && commit.user_id === currentUser.id) {
-        userCommitments[commit.item_id] = commit.quantity;
-      }
-    });
-  }
+  allCommitments.forEach(commit => {
+    commitmentTotals[commit.item_id] = (commitmentTotals[commit.item_id] || 0) + commit.quantity;
+    if (currentUser && commit.user_id === currentUser.id) {
+      userCommitments[commit.item_id] = commit.quantity;
+    }
+  });
   return currentEvent.items.map(item => {
     const totalCommitted = commitmentTotals[item.id] || 0;
-    const yourCommitment = (userCommitments[item.id] === undefined) ? 0 : userCommitments[item.id];
+    const yourCommitment = userCommitments[item.id] === undefined ? 0 : userCommitments[item.id];
     const remaining = item.quantity_required - totalCommitted;
     return `
       <div class="commitment-card">
@@ -343,9 +251,9 @@ async function renderCommitmentForm() {
         <div>Total Committed: ${totalCommitted}</div>
         <div>Your Commitment: ${yourCommitment}</div>
         <div>
-            <input type="number" id="commit-${item.id}" value="${yourCommitment}" min="0">
-            Remaining: ${remaining}
-            <button onclick="commitItem('${item.id}')">Commit</button>
+          <input type="number" id="commit-${item.id}" value="${yourCommitment}" min="0">
+          Remaining: ${remaining}
+          <button onclick="commitItem('${item.id}')">Commit</button>
         </div>
       </div>
     `;
@@ -353,25 +261,18 @@ async function renderCommitmentForm() {
 }
 
 async function renderCommitmentBreakdown() {
-  const { data: usersData } = await supabase
-    .from('event_users')
-    .select('id, username')
-    .eq('event_id', currentEvent.id);
+  const usersResponse = await fetch(`/api/event_users/?event_id=${currentEvent.id}`);
+  const usersResult = await usersResponse.json();
+  const usersData = usersResult.users || [];
   const userLookup = {};
-  if (usersData) {
-    usersData.forEach(user => {
-      if (user && user.username) {
-        userLookup[user.id] = user.username;
-      }
-    });
-  }
-  const { data: breakdownData, error } = await supabase
-    .from('commitments')
-    .select('quantity, item_id, user_id')
-    .eq('event_id', currentEvent.id);
-  if (error) {
-    return `<p>Error loading commitment breakdown.</p>`;
-  }
+  usersData.forEach(user => {
+    if (user && user.username) {
+      userLookup[user.id] = user.username;
+    }
+  });
+  const breakdownResponse = await fetch(`/api/commitments/?event_id=${currentEvent.id}`);
+  const breakdownResult = await breakdownResponse.json();
+  const breakdownData = breakdownResult.commitments || [];
   const breakdownByItem = {};
   breakdownData.forEach(row => {
     if (!row) return;
@@ -401,19 +302,19 @@ async function handleAddItem(e) {
     alert("Please provide a valid item name and quantity.");
     return;
   }
-  const insertData = {
-    event_id: currentEvent.id,
-    item_name: newItemName,
-    quantity_required: newItemQuantity
-  };
-  if (newItemDescription) {
-    insertData.item_description = newItemDescription;
-  }
-  const { error } = await supabase
-    .from('event_items')
-    .insert([insertData]);
-  if (error) {
-    alert("Error adding item: " + error.message);
+  const response = await fetch('/api/add_item/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      event_id: currentEvent.id,
+      item_name: newItemName,
+      quantity_required: newItemQuantity,
+      item_description: newItemDescription || null
+    })
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    alert("Error adding item: " + result.error);
   } else {
     alert("Item added!");
     loadEvent(currentEvent.slug);
@@ -432,25 +333,20 @@ async function updateItem(itemId) {
     alert("Please provide valid values.");
     return;
   }
-  const { data: commitmentsData } = await supabase
-    .from('commitments')
-    .select('quantity')
-    .eq('item_id', itemId);
-  const totalCommitted = commitmentsData?.reduce((sum, c) => sum + c.quantity, 0) || 0;
-  if (newQuantity < totalCommitted) {
-    alert(`Cannot reduce required quantity to ${newQuantity}. ${totalCommitted} already committed.`);
-    return;
-  }
-  const updateData = { item_name: newItemName, quantity_required: newQuantity };
-  if (newDescription !== undefined) {
-    updateData.item_description = newDescription;
-  }
-  const { error } = await supabase
-    .from('event_items')
-    .update(updateData)
-    .eq('id', itemId);
-  if (error) {
-    alert(`Error updating item: ${error.message}`);
+  // First, check total commitments for this item.
+  const response = await fetch(`/api/update_item/`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      item_id: itemId,
+      item_name: newItemName,
+      quantity_required: newQuantity,
+      item_description: newDescription || null
+    })
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    alert(`Error updating item: ${result.error}`);
   } else {
     alert("Item updated successfully!");
     loadEvent(currentEvent.slug);
@@ -465,12 +361,14 @@ async function deleteItem(itemId) {
   if (!confirm("Are you sure you want to delete this item? This cannot be undone.")) {
     return;
   }
-  const { error } = await supabase
-    .from('event_items')
-    .delete()
-    .eq('id', itemId);
-  if (error) {
-    alert(`Error deleting item: ${error.message}`);
+  const response = await fetch('/api/delete_item/', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item_id: itemId })
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    alert(`Error deleting item: ${result.error}`);
   } else {
     alert("Item deleted successfully!");
     loadEvent(currentEvent.slug);
@@ -484,43 +382,19 @@ async function commitItem(itemId) {
     alert("Please enter a valid number for commitment.");
     return;
   }
-  const { data: itemData, error: itemError } = await supabase
-    .from('event_items')
-    .select('quantity_required')
-    .eq('id', itemId)
-    .single();
-  if (itemError || !itemData) {
-    alert(`Error fetching item details: ${itemError?.message}`);
-    return;
-  }
-  const requiredQuantity = itemData.quantity_required;
-  const { data: commitmentsData } = await supabase
-    .from('commitments')
-    .select('quantity')
-    .eq('item_id', itemId);
-  const totalCommitted = commitmentsData?.reduce((sum, c) => sum + c.quantity, 0) || 0;
-  const { data: myCommitData } = await supabase
-    .from('commitments')
-    .select('quantity')
-    .eq('item_id', itemId)
-    .eq('user_id', currentUser.id)
-    .single();
-  const myCurrent = myCommitData ? myCommitData.quantity : 0;
-  const available = requiredQuantity - (totalCommitted - myCurrent);
-  if (quantity > available) {
-    alert(`Cannot commit ${quantity}. Only ${available} slots are available.`);
-    return;
-  }
-  const { error } = await supabase
-    .from('commitments')
-    .upsert([{
+  const response = await fetch('/api/commit_item/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
       event_id: currentEvent.id,
       user_id: currentUser.id,
       item_id: itemId,
-      quantity
-    }], { onConflict: ['event_id', 'user_id', 'item_id'] });
-  if (error) {
-    alert(`Error committing item: ${error.message}`);
+      quantity: quantity
+    })
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    alert(`Error committing item: ${result.error}`);
   } else {
     alert('Commitment successful!');
     loadEvent(currentEvent.slug);
@@ -534,7 +408,7 @@ function attachCommitListeners() {
   // Inline onclicks in renderCommitmentForm handle commits.
 }
 
-// Expose functions so inline onclick attributes can find them.
+// Expose functions to global scope for inline handlers.
 window.updateItem = updateItem;
 window.deleteItem = deleteItem;
 window.commitItem = commitItem;
@@ -543,7 +417,6 @@ window.commitItem = commitItem;
 // 6. App Initialization with Hash Routing
 // ----------------------
 window.addEventListener('DOMContentLoaded', async () => {
-  await initializeSupabaseClient();
   let slug = null;
   if (window.location.hash && window.location.hash.startsWith("#/event/")) {
     slug = window.location.hash.split("#/event/")[1];
