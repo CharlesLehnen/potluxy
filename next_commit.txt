@@ -1,0 +1,6 @@
+had to download docker:https://docs.docker.com/desktop/install/windows-install/
+
+(run installer as admin)
+
+to run this in powershell:
+supabase functions deploy fetchData
