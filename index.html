@@ -53,10 +53,8 @@
     })();
   </script>
 
-  <!-- jQuery and Supabase -->
+  <!-- jQuery (no direct Supabase client) -->
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-  <script type="module" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"></script>
-  <script type="module" src="config.js"></script>
 
   <!-- Stylesheet -->
   <link rel="stylesheet" href="style.css">
@@ -70,10 +68,11 @@
   <div id="formWrapper">
     <header class="logo">
       <h1>Potluxy&trade;</h1>
-      <p style = "opacity: 0;">Your ultimate tool to organize items for any group event.</p>
+      <p style="opacity: 0;">Your ultimate tool to organize items for any group event.</p>
     </header>
 
-    <main id="app">
+    <main id="app">      
+      <!-- Initial content: a login form to get started -->
       <section aria-label="User Login Form">
         <h2>Get Started with Your Event</h2>
         <form id="loginForm" class="form" method="post" action="#">
@@ -81,12 +80,10 @@
             <label for="username" class="formLabel">Username</label>
             <input type="text" id="username" class="form-style" autocomplete="off" required aria-required="true">
           </div>
-
           <div class="form-item">
             <label for="password" class="formLabel">Password</label>
             <input type="password" id="password" class="form-style" required aria-required="true">
           </div>
-
           <div class="form-item">
             <button type="submit" class="login">Log In</button>
           </div>
@@ -118,7 +115,7 @@
     </footer>
   </div>
 
-  <!-- JavaScript -->
+  <!-- JavaScript: our custom main.js which calls our Edge Functions -->
   <script type="module" src="main.js"></script>
   <script src="style.js"></script>
 </body>

@@ -1,24 +1,5 @@
-// Import Supabase client
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-
-// Global variables (will be initialized after fetching credentials)
-let supabase;
-let currentEvent = null;
-let currentUser = null; // Managed via supabase.auth
-
-// Function to initialize Supabase client by securely fetching credentials from the Edge Function
-async function initializeSupabaseClient() {
-  const EDGE_FUNCTION_URL = "https://your-project-ref.supabase.co/functions/v1/getKeys";
-  try {
-    const response = await fetch(EDGE_FUNCTION_URL);
-    if (!response.ok) throw new Error("Failed to fetch Supabase keys");
-    const { SUPABASE_URL, SUPABASE_ANON_KEY } = await response.json();
-    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    console.log("Supabase initialized securely.");
-  } catch (error) {
-    console.error("Error initializing Supabase:", error);
-  }
-}
+// Set your base URL for all Edge Function endpoints:
+const EDGE_BASE_URL = "https://wkbksxgqltncpluhvhdj.supabase.co/functions/v1/";
 
 // Utility: Construct event-specific email from username and event slug.
 function constructEmail(username, slug) {
@@ -34,31 +15,24 @@ async function renderCreateEventForm() {
     <form id="eventForm" class="form">
       <h2>Create New Event</h2>
       <br><br>
-
       <label for="eventName">Event Name:</label>
       <input type="text" id="eventName" required>
       <br><br>
-
       <label for="eventDescription">Event Description (optional):</label>
       <textarea id="eventDescription" placeholder="Enter a description..."></textarea>
       <br><br>
-
       <label for="eventDate">Event Date (optional):</label>
       <input type="date" id="eventDate">
       <br><br>
-
       <label for="eventTime">Event Time (optional):</label>
       <input type="time" id="eventTime">
       <br><br>
-
       <label for="username">Your Event Username:</label>
       <input type="text" id="username" required>
       <br><br>
-
       <label for="password">Password (optional for editing):</label>
       <input type="password" id="password">
       <br><br>
-
       <button type="submit">Create Event</button>
     </form>
   `;
@@ -85,54 +59,30 @@ async function createEvent(e) {
   const slug = generateSlug(eventName);
   const email = constructEmail(username, slug);
   
-  // Sign up via Supabase Auth.
-  const { data: authData, error: signUpError } = await supabase.auth.signUp({
-    email,
-    password: password || 'no-password'
-  });
-  if (signUpError) {
-    alert(`Error signing up: ${signUpError.message}`);
-    return;
-  }
-  
-  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError || !sessionData.session) {
-    alert('Error: User not fully authenticated after signup.');
-    return;
-  }
-  const userId = sessionData.session.user.id;
-  
-  // Create the event.
-  const { data: eventData, error: eventError } = await supabase
-    .from('events')
-    .insert([{
-      event_name: eventName,
+  // Call your Edge Function to create an event.
+  const response = await fetch(EDGE_BASE_URL + "createEvent", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      eventName,
+      eventDescription,
+      eventDate,
+      eventTime,
+      username,
+      password,
       slug,
-      created_by: username,
-      event_description: eventDescription || null,
-      event_date: eventDate || null,
-      event_time: eventTime || null
-    }])
-    .select()
-    .single();
-  if (eventError) {
-    alert(`Error creating event: ${eventError.message}`);
+      email
+    })
+  });
+  if (!response.ok) {
+    const errorData = await response.json();
+    alert("Error creating event: " + errorData.error);
     return;
   }
-  
-  const eventId = eventData.id;
-  
-  // Create event-specific profile.
-  const { data: profileData, error: profileError } = await supabase
-    .from('event_users')
-    .insert([{ id: userId, event_id: eventId, username }])
-    .select()
-    .single();
-  if (profileError) {
-    alert(`Error creating event user: ${profileError.message}`);
-    return;
-  }
-  currentUser = profileData;
+  const result = await response.json();
+  // Expecting the endpoint to return the created event and user profile data.
+  currentEvent = result.event;
+  currentUser = result.profile;
   
   alert(`Event created successfully! Share this link: ${location.origin}/#/event/${slug}`);
   window.location.hash = `#/event/${slug}`;
@@ -143,35 +93,33 @@ async function createEvent(e) {
 // 2. Event Loading & Login (Per Event)
 // ----------------------
 async function loadEvent(slug) {
-  const { data: eventData, error: eventError } = await supabase
-    .from('events')
-    .select('*, event_items(*)')
-    .eq('slug', slug)
-    .single();
-  if (eventError || !eventData) {
+  const response = await fetch(EDGE_BASE_URL + "loadEvent?slug=" + encodeURIComponent(slug));
+  if (!response.ok) {
     alert('Event not found.');
     renderCreateEventForm();
     return;
   }
+  const eventData = await response.json();
   currentEvent = eventData;
-  currentEvent.items = eventData.event_items || [];
   
-  // Check Supabase Auth session.
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) {
+  // Check if the user is authenticated (for example, via a token stored in localStorage)
+  const token = localStorage.getItem("authToken");
+  if (!token) {
     renderLoginForm(slug);
   } else {
-    const { data: profileData } = await supabase
-      .from('event_users')
-      .select('*')
-      .eq('id', session.user.id)
-      .eq('event_id', currentEvent.id)
-      .single();
-    if (!profileData) {
-      alert("No event-specific profile found; please sign up for this event.");
+    // Get the event-specific profile using the token.
+    const profileResp = await fetch(EDGE_BASE_URL + "getProfile", {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + token
+      },
+      body: JSON.stringify({ eventId: currentEvent.id })
+    });
+    if (!profileResp.ok) {
       renderLoginForm(slug);
     } else {
-      currentUser = profileData;
+      currentUser = await profileResp.json();
       renderEventDashboard();
     }
   }
@@ -199,49 +147,21 @@ async function handleLogin(e, slug) {
   const password = document.getElementById('password').value.trim();
   const email = constructEmail(username, slug);
   
-  // Attempt to sign in
-  let { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-    email, 
-    password: password || 'no-password'
+  // Call your Edge Function to handle authentication.
+  const response = await fetch(EDGE_BASE_URL + "auth", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, eventId: currentEvent.id, username })
   });
-  if (signInError) {
-    if (signInError.message.includes("Invalid login credentials")) {
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-        email, 
-        password: password || 'no-password'
-      });
-      if (signUpError) {
-        alert(`Error signing up: ${signUpError.message}`);
-        return;
-      }
-      signInData = signUpData;
-    } else {
-      alert(`Error signing in: ${signInError.message}`);
-      return;
-    }
+  if (!response.ok) {
+    const errorData = await response.json();
+    alert("Error during auth: " + errorData.error);
+    return;
   }
-  
-  // Fetch (or create) the event-specific profile.
-  const { data: profileData } = await supabase
-    .from('event_users')
-    .select('*')
-    .eq('id', signInData.session.user.id)
-    .eq('event_id', currentEvent.id)
-    .single();
-  if (!profileData) {
-    const { data: newProfile, error: newProfileError } = await supabase
-      .from('event_users')
-      .insert([{ id: signInData.session.user.id, event_id: currentEvent.id, username }])
-      .select()
-      .single();
-    if (newProfileError) {
-      alert(`Error creating event user: ${newProfileError.message}`);
-      return;
-    }
-    currentUser = newProfile;
-  } else {
-    currentUser = profileData;
-  }
+  const result = await response.json();
+  // Save the auth token and user profile
+  localStorage.setItem("authToken", result.authToken);
+  currentUser = result.profile;
   renderEventDashboard();
 }
 
@@ -317,10 +237,12 @@ function renderViewItems() {
 }
 
 async function renderCommitmentForm() {
-  const { data: allCommitments } = await supabase
-    .from('commitments')
-    .select('*')
-    .eq('event_id', currentEvent.id);
+  const response = await fetch(EDGE_BASE_URL + "getCommitments", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ eventId: currentEvent.id })
+  });
+  const allCommitments = await response.json();
   const commitmentTotals = {};
   const userCommitments = {};
   if (allCommitments) {
@@ -353,39 +275,18 @@ async function renderCommitmentForm() {
 }
 
 async function renderCommitmentBreakdown() {
-  const { data: usersData } = await supabase
-    .from('event_users')
-    .select('id, username')
-    .eq('event_id', currentEvent.id);
-  const userLookup = {};
-  if (usersData) {
-    usersData.forEach(user => {
-      if (user && user.username) {
-        userLookup[user.id] = user.username;
-      }
-    });
-  }
-  const { data: breakdownData, error } = await supabase
-    .from('commitments')
-    .select('quantity, item_id, user_id')
-    .eq('event_id', currentEvent.id);
-  if (error) {
-    return `<p>Error loading commitment breakdown.</p>`;
-  }
-  const breakdownByItem = {};
-  breakdownData.forEach(row => {
-    if (!row) return;
-    const itemId = row.item_id;
-    const username = row.user_id ? (userLookup[row.user_id] || "Unknown") : "Unknown";
-    if (!breakdownByItem[itemId]) breakdownByItem[itemId] = [];
-    breakdownByItem[itemId].push(`${username}: ${row.quantity}`);
+  const response = await fetch(EDGE_BASE_URL + "getCommitmentBreakdown", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ eventId: currentEvent.id })
   });
+  const breakdownData = await response.json();
   let html = '<h4>Commitment Breakdown</h4>';
-  currentEvent.items.forEach(item => {
-    if (breakdownByItem[item.id]) {
-      html += `<p><strong>${item.item_name}:</strong> ${breakdownByItem[item.id].join(', ')}</p>`;
+  for (const item of currentEvent.items) {
+    if (breakdownData[item.id]) {
+      html += `<p><strong>${item.item_name}:</strong> ${breakdownData[item.id].join(', ')}</p>`;
     }
-  });
+  }
   return html;
 }
 
@@ -401,19 +302,19 @@ async function handleAddItem(e) {
     alert("Please provide a valid item name and quantity.");
     return;
   }
-  const insertData = {
-    event_id: currentEvent.id,
-    item_name: newItemName,
-    quantity_required: newItemQuantity
-  };
-  if (newItemDescription) {
-    insertData.item_description = newItemDescription;
-  }
-  const { error } = await supabase
-    .from('event_items')
-    .insert([insertData]);
-  if (error) {
-    alert("Error adding item: " + error.message);
+  const response = await fetch(EDGE_BASE_URL + "addItem", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      eventId: currentEvent.id,
+      item_name: newItemName,
+      quantity_required: newItemQuantity,
+      item_description: newItemDescription
+    })
+  });
+  if (!response.ok) {
+    const err = await response.json();
+    alert("Error adding item: " + err.error);
   } else {
     alert("Item added!");
     loadEvent(currentEvent.slug);
@@ -432,25 +333,20 @@ async function updateItem(itemId) {
     alert("Please provide valid values.");
     return;
   }
-  const { data: commitmentsData } = await supabase
-    .from('commitments')
-    .select('quantity')
-    .eq('item_id', itemId);
-  const totalCommitted = commitmentsData?.reduce((sum, c) => sum + c.quantity, 0) || 0;
-  if (newQuantity < totalCommitted) {
-    alert(`Cannot reduce required quantity to ${newQuantity}. ${totalCommitted} already committed.`);
-    return;
-  }
-  const updateData = { item_name: newItemName, quantity_required: newQuantity };
-  if (newDescription !== undefined) {
-    updateData.item_description = newDescription;
-  }
-  const { error } = await supabase
-    .from('event_items')
-    .update(updateData)
-    .eq('id', itemId);
-  if (error) {
-    alert(`Error updating item: ${error.message}`);
+  const response = await fetch(EDGE_BASE_URL + "updateItem", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      itemId,
+      newItemName,
+      newQuantity,
+      newDescription,
+      eventId: currentEvent.id
+    })
+  });
+  if (!response.ok) {
+    const err = await response.json();
+    alert("Error updating item: " + err.error);
   } else {
     alert("Item updated successfully!");
     loadEvent(currentEvent.slug);
@@ -465,12 +361,14 @@ async function deleteItem(itemId) {
   if (!confirm("Are you sure you want to delete this item? This cannot be undone.")) {
     return;
   }
-  const { error } = await supabase
-    .from('event_items')
-    .delete()
-    .eq('id', itemId);
-  if (error) {
-    alert(`Error deleting item: ${error.message}`);
+  const response = await fetch(EDGE_BASE_URL + "deleteItem", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ itemId, eventId: currentEvent.id })
+  });
+  if (!response.ok) {
+    const err = await response.json();
+    alert("Error deleting item: " + err.error);
   } else {
     alert("Item deleted successfully!");
     loadEvent(currentEvent.slug);
@@ -484,45 +382,21 @@ async function commitItem(itemId) {
     alert("Please enter a valid number for commitment.");
     return;
   }
-  const { data: itemData, error: itemError } = await supabase
-    .from('event_items')
-    .select('quantity_required')
-    .eq('id', itemId)
-    .single();
-  if (itemError || !itemData) {
-    alert(`Error fetching item details: ${itemError?.message}`);
-    return;
-  }
-  const requiredQuantity = itemData.quantity_required;
-  const { data: commitmentsData } = await supabase
-    .from('commitments')
-    .select('quantity')
-    .eq('item_id', itemId);
-  const totalCommitted = commitmentsData?.reduce((sum, c) => sum + c.quantity, 0) || 0;
-  const { data: myCommitData } = await supabase
-    .from('commitments')
-    .select('quantity')
-    .eq('item_id', itemId)
-    .eq('user_id', currentUser.id)
-    .single();
-  const myCurrent = myCommitData ? myCommitData.quantity : 0;
-  const available = requiredQuantity - (totalCommitted - myCurrent);
-  if (quantity > available) {
-    alert(`Cannot commit ${quantity}. Only ${available} slots are available.`);
-    return;
-  }
-  const { error } = await supabase
-    .from('commitments')
-    .upsert([{
-      event_id: currentEvent.id,
-      user_id: currentUser.id,
-      item_id: itemId,
+  const response = await fetch(EDGE_BASE_URL + "commitItem", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      eventId: currentEvent.id,
+      userId: currentUser.id,
+      itemId,
       quantity
-    }], { onConflict: ['event_id', 'user_id', 'item_id'] });
-  if (error) {
-    alert(`Error committing item: ${error.message}`);
+    })
+  });
+  if (!response.ok) {
+    const err = await response.json();
+    alert("Error committing item: " + err.error);
   } else {
-    alert('Commitment successful!');
+    alert("Commitment successful!");
     loadEvent(currentEvent.slug);
   }
 }
@@ -534,16 +408,14 @@ function attachCommitListeners() {
   // Inline onclicks in renderCommitmentForm handle commits.
 }
 
-// Expose functions so inline onclick attributes can find them.
-window.updateItem = updateItem;
-window.deleteItem = deleteItem;
-window.commitItem = commitItem;
+// Global variables for current event and user.
+let currentEvent = null;
+let currentUser = null;
 
 // ----------------------
 // 6. App Initialization with Hash Routing
 // ----------------------
 window.addEventListener('DOMContentLoaded', async () => {
-  await initializeSupabaseClient();
   let slug = null;
   if (window.location.hash && window.location.hash.startsWith("#/event/")) {
     slug = window.location.hash.split("#/event/")[1];
