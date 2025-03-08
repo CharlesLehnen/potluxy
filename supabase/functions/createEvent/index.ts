@@ -30,41 +30,42 @@ serve(async (req) => {
       });
     }
 
-    // Use secrets from the environment
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-    const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY"); 
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-      return new Response(JSON.stringify({ error: "Supabase credentials not found" }), {
-        status: 500,
-        headers: corsHeaders,
-      });
-    }
+   // Use the service role key instead of the anon key.
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    return new Response(JSON.stringify({ error: "Supabase credentials not found" }), {
+      status: 500,
+      headers: corsHeaders,
+    });
+  }
 
-    // Create Supabase client
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  // Create Supabase client with service role key.
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Insert into your "events" table
-    const { data, error } = await supabase
-      .from("events")
-      .insert([
-        {
-          event_name: eventName,
-          slug,
-          created_by: username,
-          event_description: eventDescription,
-          event_date: eventDate,
-          event_time: eventTime,
-        },
-      ])
-      .select()
-      .single();
 
-    if (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500,
-        headers: corsHeaders,
-      });
-    }
+  // Insert into your "events" table
+  const { data, error } = await supabase
+    .from("events")
+    .insert([
+      {
+        event_name: eventName,
+        slug,
+        created_by: username,
+        event_description: eventDescription,
+        event_date: eventDate,
+        event_time: eventTime,
+      },
+    ])
+    .select()
+    .single();
+
+  if (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: corsHeaders,
+    });
+  }
 
     return new Response(JSON.stringify({ event: data }), {
       status: 200,
