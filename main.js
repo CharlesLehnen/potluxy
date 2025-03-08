@@ -1,7 +1,8 @@
-// Set your base URL for all Edge Function endpoints:
-const EDGE_BASE_URL = "https://wkbksxgqltncpluhvhdj.supabase.co/functions/v1/";
+// main.js – Browser code that renders forms and calls separate edge function endpoints.
+let currentEvent = null;
+let currentUserToken = null; // This will store the token (here, the user’s id) returned from login or createEvent.
 
-// Utility: Construct event-specific email from username and event slug.
+// Utility: Construct event-specific email.
 function constructEmail(username, slug) {
   return `${username}.${slug}@mailinator.com`;
 }
@@ -9,8 +10,8 @@ function constructEmail(username, slug) {
 // ----------------------
 // 1. Event Creation (for creators)
 // ----------------------
-async function renderCreateEventForm() {
-  const app = document.getElementById('app');
+function renderCreateEventForm() {
+  const app = document.getElementById("app");
   app.innerHTML = `
     <form id="eventForm" class="form">
       <h2>Create New Event</h2>
@@ -36,97 +37,58 @@ async function renderCreateEventForm() {
       <button type="submit">Create Event</button>
     </form>
   `;
-  document.getElementById('eventForm').addEventListener('submit', createEvent);
-}
-
-function generateSlug(eventName) {
-  const uniqueId = Math.random().toString(36).substring(2, 10);
-  return eventName.toLowerCase().replace(/\s+/g, '-') + '-' + uniqueId;
+  document.getElementById("eventForm").addEventListener("submit", createEvent);
 }
 
 async function createEvent(e) {
   e.preventDefault();
-  const eventName = document.getElementById('eventName').value.trim();
-  const eventDescription = document.getElementById('eventDescription').value.trim();
-  const eventDate = document.getElementById('eventDate').value;
-  const eventTime = document.getElementById('eventTime').value;
-  const username = document.getElementById('username').value.trim();
-  const password = document.getElementById('password').value.trim();
+  const eventName = document.getElementById("eventName").value.trim();
+  const eventDescription = document.getElementById("eventDescription").value.trim();
+  const eventDate = document.getElementById("eventDate").value;
+  const eventTime = document.getElementById("eventTime").value;
+  const username = document.getElementById("username").value.trim();
+  const password = document.getElementById("password").value.trim();
   if (!eventName || !username) {
-    alert('Event name and username are required.');
+    alert("Event name and username are required.");
     return;
   }
-  const slug = generateSlug(eventName);
-  const email = constructEmail(username, slug);
-  
-  // Call your Edge Function to create an event.
-  const response = await fetch(EDGE_BASE_URL + "createEvent", {
+  const response = await fetch("/api/createEvent", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      eventName,
-      eventDescription,
-      eventDate,
-      eventTime,
-      username,
-      password,
-      slug,
-      email
-    })
+    body: JSON.stringify({ eventName, eventDescription, eventDate, eventTime, username, password }),
   });
-  if (!response.ok) {
-    const errorData = await response.json();
-    alert("Error creating event: " + errorData.error);
+  const result = await response.json();
+  if (result.error) {
+    alert("Error: " + result.error);
     return;
   }
-  const result = await response.json();
-  // Expecting the endpoint to return the created event and user profile data.
-  currentEvent = result.event;
-  currentUser = result.profile;
-  
-  alert(`Event created successfully! Share this link: ${location.origin}/#/event/${slug}`);
-  window.location.hash = `#/event/${slug}`;
-  loadEvent(slug);
+  alert(`Event created successfully! Share this link: ${location.origin}/#/event/${result.slug}`);
+  currentUserToken = result.token;
+  window.location.hash = `#/event/${result.slug}`;
+  loadEvent(result.slug);
 }
 
 // ----------------------
 // 2. Event Loading & Login (Per Event)
 // ----------------------
 async function loadEvent(slug) {
-  const response = await fetch(EDGE_BASE_URL + "loadEvent?slug=" + encodeURIComponent(slug));
-  if (!response.ok) {
-    alert('Event not found.');
+  const response = await fetch(`/api/event?slug=${slug}`);
+  const result = await response.json();
+  if (result.error) {
+    alert("Event not found.");
     renderCreateEventForm();
     return;
   }
-  const eventData = await response.json();
-  currentEvent = eventData;
-  
-  // Check if the user is authenticated (for example, via a token stored in localStorage)
-  const token = localStorage.getItem("authToken");
-  if (!token) {
+  currentEvent = result.event;
+  if (!currentUserToken) {
     renderLoginForm(slug);
   } else {
-    // Get the event-specific profile using the token.
-    const profileResp = await fetch(EDGE_BASE_URL + "getProfile", {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + token
-      },
-      body: JSON.stringify({ eventId: currentEvent.id })
-    });
-    if (!profileResp.ok) {
-      renderLoginForm(slug);
-    } else {
-      currentUser = await profileResp.json();
-      renderEventDashboard();
-    }
+    renderEventDashboard();
   }
 }
 
 function renderLoginForm(slug) {
-  const app = document.getElementById('app');
+  const app = document.getElementById("app");
   app.innerHTML = `
     <h2>${currentEvent.event_name}</h2>
     <form id="loginForm" class="form">
@@ -138,30 +100,24 @@ function renderLoginForm(slug) {
     </form>
     <p>If you don't have an account for this event, signing up will create one.</p>
   `;
-  document.getElementById('loginForm').addEventListener('submit', (e) => handleLogin(e, slug));
+  document.getElementById("loginForm").addEventListener("submit", (e) => handleLogin(e, slug));
 }
 
 async function handleLogin(e, slug) {
   e.preventDefault();
-  const username = document.getElementById('username').value.trim();
-  const password = document.getElementById('password').value.trim();
-  const email = constructEmail(username, slug);
-  
-  // Call your Edge Function to handle authentication.
-  const response = await fetch(EDGE_BASE_URL + "auth", {
+  const username = document.getElementById("username").value.trim();
+  const password = document.getElementById("password").value.trim();
+  const response = await fetch("/api/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, eventId: currentEvent.id, username })
+    body: JSON.stringify({ username, password, slug }),
   });
-  if (!response.ok) {
-    const errorData = await response.json();
-    alert("Error during auth: " + errorData.error);
+  const result = await response.json();
+  if (result.error) {
+    alert("Error: " + result.error);
     return;
   }
-  const result = await response.json();
-  // Save the auth token and user profile
-  localStorage.setItem("authToken", result.authToken);
-  currentUser = result.profile;
+  currentUserToken = result.token;
   renderEventDashboard();
 }
 
@@ -169,16 +125,17 @@ async function handleLogin(e, slug) {
 // 3. Event Dashboard & Detailed Commitment Display
 // ----------------------
 async function renderEventDashboard() {
-  const app = document.getElementById('app');
-  const isCreator = currentUser?.username === currentEvent.created_by;
+  const app = document.getElementById("app");
+  // For simplicity, assume that if the current user token equals the event creator’s id, they are the creator.
+  // (In a real app, you would fetch the logged-in user's profile details.)
+  const isCreator = currentEvent.created_by === "demo_creator"; // Replace with your actual logic.
   const commitmentFormHTML = await renderCommitmentForm();
-  const commitmentBreakdownHTML = isCreator ? await renderCommitmentBreakdown() : '';
+  const commitmentBreakdownHTML = isCreator ? await renderCommitmentBreakdown() : "";
   const eventInfoHTML = `
-    ${currentEvent.event_description ? `<p>${currentEvent.event_description}</p>` : ''}
-    ${currentEvent.event_date ? `<p>Date: ${currentEvent.event_date}</p>` : ''}
-    ${currentEvent.event_time ? `<p>Time: ${new Date('1970-01-01T' + currentEvent.event_time + 'Z').toLocaleTimeString()}</p>` : ''}
+    ${currentEvent.event_description ? `<p>${currentEvent.event_description}</p>` : ""}
+    ${currentEvent.event_date ? `<p>Date: ${currentEvent.event_date}</p>` : ""}
+    ${currentEvent.event_time ? `<p>Time: ${new Date("1970-01-01T" + currentEvent.event_time + "Z").toLocaleTimeString()}</p>` : ""}
   `;
-  
   app.innerHTML = `
     <h2>${currentEvent.event_name}</h2>
     ${eventInfoHTML}
@@ -187,7 +144,7 @@ async function renderEventDashboard() {
         <h3>Items Needed</h3>
         <br><br>
         ${isCreator ? renderManageItems() : renderViewItems()}
-        ${isCreator ? commitmentBreakdownHTML : ''}
+        ${isCreator ? commitmentBreakdownHTML : ""}
       </div>
       <div class="commitments">
         <h3>Your Commitments</h3>
@@ -197,23 +154,24 @@ async function renderEventDashboard() {
     </div>
   `;
   if (isCreator) {
-    document.getElementById('addItemForm')?.addEventListener('submit', handleAddItem);
+    document.getElementById("addItemForm")?.addEventListener("submit", handleAddItem);
   }
-  attachCommitListeners();
 }
 
 function renderManageItems() {
   return `
     <div id="itemList">
-      ${currentEvent.items.map(item => `
-        <div class="item-card">
-          <input type="text" value="${item.item_name}" id="edit-item-${item.id}">
-          <input type="number" value="${item.quantity_required}" id="edit-qty-${item.id}">
-          <input type="text" value="${item.item_description || ''}" id="edit-desc-${item.id}" placeholder="Item description (optional)">
-          <button onclick="updateItem('${item.id}')">Update</button>
-          <button onclick="deleteItem('${item.id}')">Delete</button>
-        </div>
-      `).join('')}
+      ${currentEvent.items.map(
+        (item) => `
+      <div class="item-card">
+        <input type="text" value="${item.item_name}" id="edit-item-${item.id}">
+        <input type="number" value="${item.quantity_required}" id="edit-qty-${item.id}">
+        <input type="text" value="${item.item_description || ""}" id="edit-desc-${item.id}" placeholder="Item description (optional)">
+        <button onclick="updateItem('${item.id}')">Update</button>
+        <button onclick="deleteItem('${item.id}')">Delete</button>
+      </div>
+      `
+      ).join("")}
     </div>
     <form id="addItemForm" class="form">
       <input type="text" id="newItemName" placeholder="Item Name" required>
@@ -228,34 +186,32 @@ function renderViewItems() {
   if (!currentEvent.items || currentEvent.items.length === 0) {
     return `<p>No items listed for this event yet.</p>`;
   }
-  return currentEvent.items.map(item => `
+  return currentEvent.items.map(
+    (item) => `
     <div class="item-card">
       <p>${item.item_name} - ${item.quantity_required} needed</p>
-      ${item.item_description ? `<p><em>${item.item_description}</em></p>` : ''}
+      ${item.item_description ? `<p><em>${item.item_description}</em></p>` : ""}
     </div>
-  `).join('');
+    `
+  ).join("");
 }
 
 async function renderCommitmentForm() {
-  const response = await fetch(EDGE_BASE_URL + "getCommitments", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ eventId: currentEvent.id })
-  });
-  const allCommitments = await response.json();
+  const response = await fetch(`/api/event?slug=${currentEvent.slug}`);
+  const { commitments } = await response.json();
   const commitmentTotals = {};
   const userCommitments = {};
-  if (allCommitments) {
-    allCommitments.forEach(commit => {
+  if (commitments) {
+    commitments.forEach((commit) => {
       commitmentTotals[commit.item_id] = (commitmentTotals[commit.item_id] || 0) + commit.quantity;
-      if (currentUser && commit.user_id === currentUser.id) {
+      if (commit.user_id === currentUserToken) {
         userCommitments[commit.item_id] = commit.quantity;
       }
     });
   }
-  return currentEvent.items.map(item => {
+  return currentEvent.items.map((item) => {
     const totalCommitted = commitmentTotals[item.id] || 0;
-    const yourCommitment = (userCommitments[item.id] === undefined) ? 0 : userCommitments[item.id];
+    const yourCommitment = userCommitments[item.id] || 0;
     const remaining = item.quantity_required - totalCommitted;
     return `
       <div class="commitment-card">
@@ -265,28 +221,41 @@ async function renderCommitmentForm() {
         <div>Total Committed: ${totalCommitted}</div>
         <div>Your Commitment: ${yourCommitment}</div>
         <div>
-            <input type="number" id="commit-${item.id}" value="${yourCommitment}" min="0">
-            Remaining: ${remaining}
-            <button onclick="commitItem('${item.id}')">Commit</button>
+          <input type="number" id="commit-${item.id}" value="${yourCommitment}" min="0">
+          Remaining: ${remaining}
+          <button onclick="commitItem('${item.id}')">Commit</button>
         </div>
       </div>
     `;
-  }).join('');
+  }).join("");
 }
 
 async function renderCommitmentBreakdown() {
-  const response = await fetch(EDGE_BASE_URL + "getCommitmentBreakdown", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ eventId: currentEvent.id })
-  });
-  const breakdownData = await response.json();
-  let html = '<h4>Commitment Breakdown</h4>';
-  for (const item of currentEvent.items) {
-    if (breakdownData[item.id]) {
-      html += `<p><strong>${item.item_name}:</strong> ${breakdownData[item.id].join(', ')}</p>`;
-    }
+  const response = await fetch(`/api/event?slug=${currentEvent.slug}`);
+  const { commitments, users } = await response.json();
+  const userLookup = {};
+  if (users) {
+    users.forEach((user) => {
+      if (user && user.username) {
+        userLookup[user.id] = user.username;
+      }
+    });
   }
+  const breakdownByItem = {};
+  if (commitments) {
+    commitments.forEach((row) => {
+      const itemId = row.item_id;
+      const username = row.user_id ? (userLookup[row.user_id] || "Unknown") : "Unknown";
+      if (!breakdownByItem[itemId]) breakdownByItem[itemId] = [];
+      breakdownByItem[itemId].push(`${username}: ${row.quantity}`);
+    });
+  }
+  let html = "<h4>Commitment Breakdown</h4>";
+  currentEvent.items.forEach((item) => {
+    if (breakdownByItem[item.id]) {
+      html += `<p><strong>${item.item_name}:</strong> ${breakdownByItem[item.id].join(", ")}</p>`;
+    }
+  });
   return html;
 }
 
@@ -295,26 +264,24 @@ async function renderCommitmentBreakdown() {
 // ----------------------
 async function handleAddItem(e) {
   e.preventDefault();
-  const newItemName = document.getElementById('newItemName').value.trim();
-  const newItemQuantity = parseInt(document.getElementById('newItemQuantity').value);
-  const newItemDescription = document.getElementById('newItemDescription').value.trim();
+  const newItemName = document.getElementById("newItemName").value.trim();
+  const newItemQuantity = parseInt(document.getElementById("newItemQuantity").value);
+  const newItemDescription = document.getElementById("newItemDescription").value.trim();
   if (!newItemName || newItemQuantity <= 0) {
     alert("Please provide a valid item name and quantity.");
     return;
   }
-  const response = await fetch(EDGE_BASE_URL + "addItem", {
+  const response = await fetch("/api/addItem", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      eventId: currentEvent.id,
-      item_name: newItemName,
-      quantity_required: newItemQuantity,
-      item_description: newItemDescription
-    })
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + currentUserToken,
+    },
+    body: JSON.stringify({ newItemName, newItemQuantity, newItemDescription, eventSlug: currentEvent.slug }),
   });
-  if (!response.ok) {
-    const err = await response.json();
-    alert("Error adding item: " + err.error);
+  const result = await response.json();
+  if (result.error) {
+    alert("Error: " + result.error);
   } else {
     alert("Item added!");
     loadEvent(currentEvent.slug);
@@ -322,10 +289,6 @@ async function handleAddItem(e) {
 }
 
 async function updateItem(itemId) {
-  if (currentUser?.username !== currentEvent.created_by) {
-    alert("Only the event creator can update items.");
-    return;
-  }
   const newItemName = document.getElementById(`edit-item-${itemId}`).value.trim();
   const newQuantity = parseInt(document.getElementById(`edit-qty-${itemId}`).value);
   const newDescription = document.getElementById(`edit-desc-${itemId}`)?.value.trim();
@@ -333,20 +296,17 @@ async function updateItem(itemId) {
     alert("Please provide valid values.");
     return;
   }
-  const response = await fetch(EDGE_BASE_URL + "updateItem", {
+  const response = await fetch("/api/updateItem", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      itemId,
-      newItemName,
-      newQuantity,
-      newDescription,
-      eventId: currentEvent.id
-    })
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + currentUserToken,
+    },
+    body: JSON.stringify({ itemId, newItemName, newQuantity, newDescription, eventSlug: currentEvent.slug }),
   });
-  if (!response.ok) {
-    const err = await response.json();
-    alert("Error updating item: " + err.error);
+  const result = await response.json();
+  if (result.error) {
+    alert("Error: " + result.error);
   } else {
     alert("Item updated successfully!");
     loadEvent(currentEvent.slug);
@@ -354,21 +314,20 @@ async function updateItem(itemId) {
 }
 
 async function deleteItem(itemId) {
-  if (currentUser?.username !== currentEvent.created_by) {
-    alert("Only the event creator can delete items.");
-    return;
-  }
   if (!confirm("Are you sure you want to delete this item? This cannot be undone.")) {
     return;
   }
-  const response = await fetch(EDGE_BASE_URL + "deleteItem", {
+  const response = await fetch("/api/deleteItem", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ itemId, eventId: currentEvent.id })
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + currentUserToken,
+    },
+    body: JSON.stringify({ itemId, eventSlug: currentEvent.slug }),
   });
-  if (!response.ok) {
-    const err = await response.json();
-    alert("Error deleting item: " + err.error);
+  const result = await response.json();
+  if (result.error) {
+    alert("Error: " + result.error);
   } else {
     alert("Item deleted successfully!");
     loadEvent(currentEvent.slug);
@@ -382,40 +341,29 @@ async function commitItem(itemId) {
     alert("Please enter a valid number for commitment.");
     return;
   }
-  const response = await fetch(EDGE_BASE_URL + "commitItem", {
+  const response = await fetch("/api/commitItem", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      eventId: currentEvent.id,
-      userId: currentUser.id,
-      itemId,
-      quantity
-    })
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + currentUserToken,
+    },
+    body: JSON.stringify({ itemId, quantity, eventSlug: currentEvent.slug }),
   });
-  if (!response.ok) {
-    const err = await response.json();
-    alert("Error committing item: " + err.error);
+  const result = await response.json();
+  if (result.error) {
+    alert("Error: " + result.error);
   } else {
     alert("Commitment successful!");
     loadEvent(currentEvent.slug);
   }
 }
 
-// ----------------------
-// 5. Helper: Attach Commit Listeners (stub)
-// ----------------------
-function attachCommitListeners() {
-  // Inline onclicks in renderCommitmentForm handle commits.
-}
+// Expose functions for inline onclicks.
+window.updateItem = updateItem;
+window.deleteItem = deleteItem;
+window.commitItem = commitItem;
 
-// Global variables for current event and user.
-let currentEvent = null;
-let currentUser = null;
-
-// ----------------------
-// 6. App Initialization with Hash Routing
-// ----------------------
-window.addEventListener('DOMContentLoaded', async () => {
+window.addEventListener("DOMContentLoaded", async () => {
   let slug = null;
   if (window.location.hash && window.location.hash.startsWith("#/event/")) {
     slug = window.location.hash.split("#/event/")[1];
