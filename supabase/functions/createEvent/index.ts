@@ -1,15 +1,13 @@
-// createEvent/index.ts – Supabase Edge Function for creating an event with CORS handling and explicit select
+// createEvent/index.ts – Fixed Supabase Edge Function for creating an event with full slug return
 import { serve } from "https://deno.land/std@0.152.0/http/server.ts";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
-// Get these from your deployment environment
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-// CORS Headers
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*", // Adjust as needed for production
+  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
@@ -24,7 +22,6 @@ function constructEmail(username: string, slug: string) {
 }
 
 serve(async (req) => {
-  // Handle CORS Preflight Requests
   if (req.method === "OPTIONS") {
     return new Response("OK", { status: 200, headers: corsHeaders });
   }
@@ -39,16 +36,18 @@ serve(async (req) => {
   try {
     const body = await req.json();
     const { eventName, eventDescription, eventDate, eventTime, username, password } = body;
+
     if (!eventName || !username) {
       return new Response(JSON.stringify({ error: "Event name and username are required" }), {
         status: 400,
         headers: corsHeaders,
       });
     }
+
     const slug = generateSlug(eventName);
     const email = constructEmail(username, slug);
 
-    // Create the auth user via the admin API (bypassing email confirmation)
+    // Create auth user
     const { data: userData, error: userError } = await supabase.auth.admin.createUser({
       email,
       password: password || "no-password",
@@ -60,10 +59,10 @@ serve(async (req) => {
         headers: corsHeaders,
       });
     }
+
     const newUser = userData.user;
 
-    // Insert the event record.
-    // Explicitly select the id and slug so we can return them.
+    // Create event
     const { data: eventData, error: eventError } = await supabase
       .from("events")
       .insert([{
@@ -76,20 +75,21 @@ serve(async (req) => {
       }])
       .select("id, slug")
       .single();
-    if (eventError) {
-      return new Response(JSON.stringify({ error: eventError.message }), {
+
+    if (eventError || !eventData) {
+      return new Response(JSON.stringify({ error: eventError?.message || "Could not create event" }), {
         status: 400,
         headers: corsHeaders,
       });
     }
+
     const eventId = eventData.id;
 
-    // Insert the event-specific user profile.
-    const { data: profileData, error: profileError } = await supabase
+    // Create event user profile
+    const { error: profileError } = await supabase
       .from("event_users")
-      .insert([{ id: newUser.id, event_id: eventId, username }])
-      .select()
-      .single();
+      .insert([{ id: newUser.id, event_id: eventId, username }]);
+
     if (profileError) {
       return new Response(JSON.stringify({ error: profileError.message }), {
         status: 400,
@@ -98,7 +98,12 @@ serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ message: "Event created successfully", slug, token: newUser.id, eventId }),
+      JSON.stringify({
+        message: "Event created successfully",
+        slug: eventData.slug,
+        token: newUser.id,
+        eventId,
+      }),
       {
         status: 200,
         headers: { "Content-Type": "application/json", ...corsHeaders },
