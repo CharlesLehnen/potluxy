@@ -1,4 +1,4 @@
-// login/index.ts – Supabase Edge Function for event login
+// login/index.ts – Supabase Edge Function for event login with CORS handling
 import { serve } from "https://deno.land/std@0.152.0/http/server.ts";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
@@ -6,19 +6,30 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+// CORS Headers
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
 function constructEmail(username: string, slug: string) {
   return `${username}.${slug}@mailinator.com`;
 }
 
 serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("OK", { status: 200, headers: corsHeaders });
+  }
+  
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405 });
+    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: corsHeaders });
   }
   try {
     const body = await req.json();
     const { username, password, slug } = body;
     if (!username || !slug) {
-      return new Response(JSON.stringify({ error: "Username and slug are required" }), { status: 400 });
+      return new Response(JSON.stringify({ error: "Username and slug are required" }), { status: 400, headers: corsHeaders });
     }
     const email = constructEmail(username, slug);
 
@@ -36,15 +47,15 @@ serve(async (req) => {
           email_confirm: true,
         });
         if (signUpError) {
-          return new Response(JSON.stringify({ error: signUpError.message }), { status: 400 });
+          return new Response(JSON.stringify({ error: signUpError.message }), { status: 400, headers: corsHeaders });
         }
       } else {
-        return new Response(JSON.stringify({ error: signInError.message }), { status: 400 });
+        return new Response(JSON.stringify({ error: signInError.message }), { status: 400, headers: corsHeaders });
       }
     }
     const user = signInData.session ? signInData.session.user : null;
     if (!user) {
-      return new Response(JSON.stringify({ error: "User not authenticated" }), { status: 401 });
+      return new Response(JSON.stringify({ error: "User not authenticated" }), { status: 401, headers: corsHeaders });
     }
     // Look up the event ID using the slug.
     const { data: eventRec } = await supabase
@@ -53,7 +64,7 @@ serve(async (req) => {
       .eq("slug", slug)
       .maybeSingle();
     if (!eventRec) {
-      return new Response(JSON.stringify({ error: "Event not found" }), { status: 404 });
+      return new Response(JSON.stringify({ error: "Event not found" }), { status: 404, headers: corsHeaders });
     }
     // Check if an event-specific profile exists.
     let { data: profileData } = await supabase
@@ -69,14 +80,14 @@ serve(async (req) => {
         .select()
         .single();
       if (newProfileError) {
-        return new Response(JSON.stringify({ error: newProfileError.message }), { status: 400 });
+        return new Response(JSON.stringify({ error: newProfileError.message }), { status: 400, headers: corsHeaders });
       }
     }
     return new Response(
       JSON.stringify({ message: "Login successful", token: user.id }),
-      { headers: { "Content-Type": "application/json" } }
+      { headers: { "Content-Type": "application/json", ...corsHeaders } }
     );
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
   }
 });

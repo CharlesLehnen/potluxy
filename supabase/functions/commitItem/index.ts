@@ -1,10 +1,17 @@
-// commitItem/index.ts – Supabase Edge Function to commit to an item
+// commitItem/index.ts – Supabase Edge Function to commit to an item with CORS handling
 import { serve } from "https://deno.land/std@0.152.0/http/server.ts";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+// CORS Headers
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
 
 async function getUserId(req: Request): Promise<string | null> {
   const authHeader = req.headers.get("Authorization");
@@ -18,18 +25,22 @@ async function getUserId(req: Request): Promise<string | null> {
 }
 
 serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("OK", { status: 200, headers: corsHeaders });
+  }
+  
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405 });
+    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: corsHeaders });
   }
   const userId = await getUserId(req);
   if (!userId) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
   }
   try {
     const body = await req.json();
     const { itemId, quantity, eventSlug } = body;
     if (isNaN(quantity) || quantity < 0) {
-      return new Response(JSON.stringify({ error: "Invalid commitment quantity" }), { status: 400 });
+      return new Response(JSON.stringify({ error: "Invalid commitment quantity" }), { status: 400, headers: corsHeaders });
     }
     const { data: eventData } = await supabase
       .from("events")
@@ -37,7 +48,7 @@ serve(async (req) => {
       .eq("slug", eventSlug)
       .maybeSingle();
     if (!eventData) {
-      return new Response(JSON.stringify({ error: "Event not found" }), { status: 404 });
+      return new Response(JSON.stringify({ error: "Event not found" }), { status: 404, headers: corsHeaders });
     }
     const { data: itemData, error: itemError } = await supabase
       .from("event_items")
@@ -45,7 +56,7 @@ serve(async (req) => {
       .eq("id", itemId)
       .single();
     if (itemError || !itemData) {
-      return new Response(JSON.stringify({ error: "Item not found" }), { status: 404 });
+      return new Response(JSON.stringify({ error: "Item not found" }), { status: 404, headers: corsHeaders });
     }
     const requiredQuantity = itemData.quantity_required;
     const { data: commitmentsData } = await supabase
@@ -64,7 +75,7 @@ serve(async (req) => {
     if (quantity > available) {
       return new Response(
         JSON.stringify({ error: `Cannot commit ${quantity}. Only ${available} slots available.` }),
-        { status: 400 }
+        { status: 400, headers: corsHeaders }
       );
     }
     const { error } = await supabase
@@ -76,10 +87,10 @@ serve(async (req) => {
         quantity,
       }], { onConflict: ["event_id", "user_id", "item_id"] });
     if (error) {
-      return new Response(JSON.stringify({ error: error.message }), { status: 400 });
+      return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: corsHeaders });
     }
-    return new Response(JSON.stringify({ message: "Commitment successful" }), { headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ message: "Commitment successful" }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
   }
 });
