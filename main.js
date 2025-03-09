@@ -1,3 +1,7 @@
+// Replace with your Supabase project URL
+const SUPABASE_FUNCTIONS_URL = "https://wkbksxgqltncpluhvhdj.supabase.co/functions/v1";
+
+
 // main.js – Browser code that renders forms and calls separate edge function endpoints.
 let currentEvent = null;
 let currentUserToken = null; // This will store the token (here, the user’s id) returned from login or createEvent.
@@ -52,7 +56,7 @@ async function createEvent(e) {
     alert("Event name and username are required.");
     return;
   }
-  const response = await fetch("/api/createEvent", {
+  const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/createEvent`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ eventName, eventDescription, eventDate, eventTime, username, password }),
@@ -72,7 +76,7 @@ async function createEvent(e) {
 // 2. Event Loading & Login (Per Event)
 // ----------------------
 async function loadEvent(slug) {
-  const response = await fetch(`/api/event?slug=${slug}`);
+  const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/event?slug=${slug}`);
   const result = await response.json();
   if (result.error) {
     alert("Event not found.");
@@ -107,7 +111,7 @@ async function handleLogin(e, slug) {
   e.preventDefault();
   const username = document.getElementById("username").value.trim();
   const password = document.getElementById("password").value.trim();
-  const response = await fetch("/api/login", {
+  const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password, slug }),
@@ -271,7 +275,7 @@ async function handleAddItem(e) {
     alert("Please provide a valid item name and quantity.");
     return;
   }
-  const response = await fetch("/api/addItem", {
+  const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/addItem`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -296,7 +300,7 @@ async function updateItem(itemId) {
     alert("Please provide valid values.");
     return;
   }
-  const response = await fetch("/api/updateItem", {
+  const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/updateItem`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -317,7 +321,7 @@ async function deleteItem(itemId) {
   if (!confirm("Are you sure you want to delete this item? This cannot be undone.")) {
     return;
   }
-  const response = await fetch("/api/deleteItem", {
+  const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/deleteItem`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -341,7 +345,7 @@ async function commitItem(itemId) {
     alert("Please enter a valid number for commitment.");
     return;
   }
-  const response = await fetch("/api/commitItem", {
+  const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/commitItem`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
