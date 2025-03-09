@@ -1,81 +1,128 @@
-body {
-  font-family: Arial, sans-serif;
-  line-height: 1.6;
-  color: #333;
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 20px;
-  background-color: #f4f4f4;
+* {
+  margin: 0 0;
+  padding: 0 0;
+  box-sizing: border-box;
 }
 
-h1, h2, h3 {
+
+html, body {
+  /* height: 100%;
+  width: 100%; */
+  margin: 0 0;
+  padding: 0 0;
+  background-size: cover;
+  font-family: 'HelveticaNeue', 'Arial', sans-serif;
+  transition: background-color 0.5s ease;
+}
+
+h1 {
+  color: #2c3e50;
+  transition: color 0.5s ease;
+  text-align: center;
+  padding-top: 3vh;
+}
+
+#formWrapper {
+  /* height: 100vh; 
+  width: 100vw;   */
+  margin: 0;
+  padding: 0;
+  background-color: rgba(0, 0, 0, 0.3); /* Or any background color you prefer */
+}
+
+
+/* Darkened background when focusing */
+#formWrapper.darken-bg {
+  background-color: rgb(117, 112, 112);
+}
+
+/* Logo active state */
+.logo-active h1 {
+  color: #44aacc;
+}
+
+
+h2, h3 {
   color: #2c3e50;
   text-align: center;
 }
 
-form, #eventDetails {
-  background: white;
+.form {
+  background: rgba(255,255,255,0.9);
   padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 0 10px rgba(0,0,0,0.1);
-  margin-bottom: 20px;
+  border-radius: 5px;
+  max-width: 360px;
+  margin: 30px auto;
+  box-shadow: 0 0 10px rgba(0,0,0,0.2);
 }
 
-label {
-  display: block;
-  margin-top: 10px;
+.dashboard {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  justify-content: center;
 }
 
-input[type="text"], input[type="number"], input[type="password"] {
+.items, .commitments {
+  background: rgba(255,255,255,0.95);
+  padding: 20px;
+  border-radius: 5px;
+  flex: 1;
+  min-width: 300px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.2);
+}
+
+.item-card, .commitment-card {
+  background: #fff;
+  padding: 10px;
+  margin-bottom: 10px;
+  border-radius: 5px;
+  box-shadow: 0 0 5px rgba(0,0,0,0.1);
+}
+
+input[type="text"], input[type="number"], input[type="password"], textarea {
   width: 100%;
   padding: 8px;
   margin-top: 5px;
   border: 1px solid #ddd;
   border-radius: 4px;
+  box-sizing: border-box;
 }
 
 button {
   background-color: #3498db;
-  color: white;
+  color: #fff;
   padding: 10px 15px;
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  margin-top: 20px;
+  margin-top: 10px;
 }
 
 button:hover {
   background-color: #2980b9;
 }
 
-#itemList, #commitList, #commitmentSummary {
-  margin-top: 20px;
+/* Google Translate Widget Styling */
+.translate-widget {
+  background-color: rgba(255, 255, 255, 0.9);
+  padding: 2.5vh 3vw 2.5vh 0; /* Add right padding */
+  margin: 0;
+  border-radius: 0; /* Ensure no rounded corners */
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+  transition: background-color 0.5s ease;
+  width: 100vw; /* Full width of viewport */
+  text-align: right; /* Right justify the content */
 }
 
-.item {
-  background: white;
-  margin-bottom: 10px;
-  padding: 10px;
-  border-radius: 4px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+footer {
+  padding-left: 20px;
+  padding-bottom: 20px;
 }
 
-.remove {
-  color: #e74c3c;
-  cursor: pointer;
+.adsense-slot {
+  margin: 10vw auto;
+  text-align: center;
 }
 
-.commitment {
-  background: #ecf0f1;
-  padding: 10px;
-  margin-bottom: 10px;
-  border-radius: 4px;
-}
 
-.error {
-  color: #e74c3c;
-  margin-top: 10px;
-}
-  
