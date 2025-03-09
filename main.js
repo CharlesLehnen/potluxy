@@ -18,37 +18,32 @@ function constructEmail(username, slug) {
 async function renderCreateEventForm() {
   const app = document.getElementById('app');
   app.innerHTML = `
-    <form id="eventForm" class="form">
-      <h2>Create New Event</h2>
-      <br><br>
-
-      <label for="eventName">Event Name:</label>
-      <input type="text" id="eventName" required>
-      <br><br>
-
-      <label for="eventDescription">Event Description (optional):</label>
-      <textarea id="eventDescription" placeholder="Enter a description..."></textarea>
-      <br><br>
-
-      <label for="eventDate">Event Date (optional):</label>
-      <input type="date" id="eventDate">
-      <br><br>
-
-      <label for="eventTime">Event Time (optional):</label>
-      <input type="time" id="eventTime">
-      <br><br>
-
-      <label for="username">Your Event Username:</label>
-      <input type="text" id="username" required>
-      <br><br>
-
-      <label for="password">Password (optional for editing):</label>
-      <input type="password" id="password">
-      <br><br>
-
-      <button type="submit">Create Event</button>
-    </form>
+    <h2>${currentEvent.event_name}</h2>
+    ${eventInfoHTML}
+    <div class="dashboard">
+      <div class="items">
+        <h3>Items Needed</h3>
+        <br><br>
+        ${isCreator ? renderManageItems() : renderViewItems()}
+        ${isCreator ? commitmentBreakdownHTML : ''}
+      </div>
+      <div class="commitments">
+        <h3>Your Commitments</h3>
+        <br><br>
+        ${commitmentFormHTML}
+      </div>
+    </div>
+    <div class="adsense-slot">
+      <!-- AdSense Ad (only shown on content-rich screen) -->
+      <ins class="adsbygoogle"
+          style="display:block"
+          data-ad-client="ca-pub-9283020036917902"
+          data-ad-slot="1234567890"
+          data-ad-format="auto"
+          data-full-width-responsive="true"></ins>
+    </div>
   `;
+  (adsbygoogle = window.adsbygoogle || []).push({});
   document.getElementById('eventForm').addEventListener('submit', createEvent);
 }
 
