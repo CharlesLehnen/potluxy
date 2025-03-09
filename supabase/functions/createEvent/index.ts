@@ -1,4 +1,4 @@
-// createEvent/index.ts – Supabase Edge Function for creating an event
+// createEvent/index.ts – Supabase Edge Function for creating an event with CORS handling and explicit select
 import { serve } from "https://deno.land/std@0.152.0/http/server.ts";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
@@ -9,7 +9,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 // CORS Headers
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*", // Allow all origins (restrict to your domain if needed)
+  "Access-Control-Allow-Origin": "*", // Adjust as needed for production
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
@@ -29,7 +29,6 @@ serve(async (req) => {
     return new Response("OK", { status: 200, headers: corsHeaders });
   }
 
-  // Only allow POST requests
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,
@@ -40,14 +39,12 @@ serve(async (req) => {
   try {
     const body = await req.json();
     const { eventName, eventDescription, eventDate, eventTime, username, password } = body;
-
     if (!eventName || !username) {
       return new Response(JSON.stringify({ error: "Event name and username are required" }), {
         status: 400,
         headers: corsHeaders,
       });
     }
-
     const slug = generateSlug(eventName);
     const email = constructEmail(username, slug);
 
@@ -57,39 +54,34 @@ serve(async (req) => {
       password: password || "no-password",
       email_confirm: true,
     });
-
     if (userError) {
       return new Response(JSON.stringify({ error: userError.message }), {
         status: 400,
         headers: corsHeaders,
       });
     }
-
     const newUser = userData.user;
 
     // Insert the event record.
+    // Explicitly select the id and slug so we can return them.
     const { data: eventData, error: eventError } = await supabase
       .from("events")
-      .insert([
-        {
-          event_name: eventName,
-          slug,
-          created_by: username,
-          event_description: eventDescription || null,
-          event_date: eventDate || null,
-          event_time: eventTime || null,
-        },
-      ])
-      .select()
+      .insert([{
+        event_name: eventName,
+        slug,
+        created_by: username,
+        event_description: eventDescription || null,
+        event_date: eventDate || null,
+        event_time: eventTime || null,
+      }])
+      .select("id, slug")
       .single();
-
     if (eventError) {
       return new Response(JSON.stringify({ error: eventError.message }), {
         status: 400,
         headers: corsHeaders,
       });
     }
-
     const eventId = eventData.id;
 
     // Insert the event-specific user profile.
@@ -98,7 +90,6 @@ serve(async (req) => {
       .insert([{ id: newUser.id, event_id: eventId, username }])
       .select()
       .single();
-
     if (profileError) {
       return new Response(JSON.stringify({ error: profileError.message }), {
         status: 400,

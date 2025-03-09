@@ -706,13 +706,20 @@ window.addEventListener("DOMContentLoaded", async () => {
 
 addItem/index.ts
 
-// addItem/index.ts – Supabase Edge Function to add an item
+// addItem/index.ts – Supabase Edge Function to add an item with CORS handling
 import { serve } from "https://deno.land/std@0.152.0/http/server.ts";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+// CORS Headers
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
 
 // Helper: Validate Authorization header and return user ID.
 async function getUserId(req: Request): Promise<string | null> {
@@ -727,18 +734,22 @@ async function getUserId(req: Request): Promise<string | null> {
 }
 
 serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("OK", { status: 200, headers: corsHeaders });
+  }
+  
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405 });
+    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: corsHeaders });
   }
   const userId = await getUserId(req);
   if (!userId) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
   }
   try {
     const body = await req.json();
     const { newItemName, newItemQuantity, newItemDescription, eventSlug } = body;
     if (!newItemName || newItemQuantity <= 0) {
-      return new Response(JSON.stringify({ error: "Invalid item details" }), { status: 400 });
+      return new Response(JSON.stringify({ error: "Invalid item details" }), { status: 400, headers: corsHeaders });
     }
     const { data: eventData } = await supabase
       .from("events")
@@ -746,7 +757,7 @@ serve(async (req) => {
       .eq("slug", eventSlug)
       .maybeSingle();
     if (!eventData) {
-      return new Response(JSON.stringify({ error: "Event not found" }), { status: 404 });
+      return new Response(JSON.stringify({ error: "Event not found" }), { status: 404, headers: corsHeaders });
     }
     // Ensure the current user is the event creator.
     const { data: profile } = await supabase
@@ -756,7 +767,7 @@ serve(async (req) => {
       .eq("event_id", eventData.id)
       .maybeSingle();
     if (!profile || profile.username !== eventData.created_by) {
-      return new Response(JSON.stringify({ error: "Only the event creator can add items" }), { status: 403 });
+      return new Response(JSON.stringify({ error: "Only the event creator can add items" }), { status: 403, headers: corsHeaders });
     }
     const insertData: any = {
       event_id: eventData.id,
@@ -770,23 +781,31 @@ serve(async (req) => {
       .from("event_items")
       .insert([insertData]);
     if (error) {
-      return new Response(JSON.stringify({ error: error.message }), { status: 400 });
+      return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: corsHeaders });
     }
-    return new Response(JSON.stringify({ message: "Item added" }), { headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ message: "Item added" }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
   }
 });
 
+
 commitItem/index.ts
 
-// commitItem/index.ts – Supabase Edge Function to commit to an item
+// commitItem/index.ts – Supabase Edge Function to commit to an item with CORS handling
 import { serve } from "https://deno.land/std@0.152.0/http/server.ts";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+// CORS Headers
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
 
 async function getUserId(req: Request): Promise<string | null> {
   const authHeader = req.headers.get("Authorization");
@@ -800,18 +819,22 @@ async function getUserId(req: Request): Promise<string | null> {
 }
 
 serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("OK", { status: 200, headers: corsHeaders });
+  }
+  
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405 });
+    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: corsHeaders });
   }
   const userId = await getUserId(req);
   if (!userId) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
   }
   try {
     const body = await req.json();
     const { itemId, quantity, eventSlug } = body;
     if (isNaN(quantity) || quantity < 0) {
-      return new Response(JSON.stringify({ error: "Invalid commitment quantity" }), { status: 400 });
+      return new Response(JSON.stringify({ error: "Invalid commitment quantity" }), { status: 400, headers: corsHeaders });
     }
     const { data: eventData } = await supabase
       .from("events")
@@ -819,7 +842,7 @@ serve(async (req) => {
       .eq("slug", eventSlug)
       .maybeSingle();
     if (!eventData) {
-      return new Response(JSON.stringify({ error: "Event not found" }), { status: 404 });
+      return new Response(JSON.stringify({ error: "Event not found" }), { status: 404, headers: corsHeaders });
     }
     const { data: itemData, error: itemError } = await supabase
       .from("event_items")
@@ -827,7 +850,7 @@ serve(async (req) => {
       .eq("id", itemId)
       .single();
     if (itemError || !itemData) {
-      return new Response(JSON.stringify({ error: "Item not found" }), { status: 404 });
+      return new Response(JSON.stringify({ error: "Item not found" }), { status: 404, headers: corsHeaders });
     }
     const requiredQuantity = itemData.quantity_required;
     const { data: commitmentsData } = await supabase
@@ -846,7 +869,7 @@ serve(async (req) => {
     if (quantity > available) {
       return new Response(
         JSON.stringify({ error: `Cannot commit ${quantity}. Only ${available} slots available.` }),
-        { status: 400 }
+        { status: 400, headers: corsHeaders }
       );
     }
     const { error } = await supabase
@@ -858,104 +881,32 @@ serve(async (req) => {
         quantity,
       }], { onConflict: ["event_id", "user_id", "item_id"] });
     if (error) {
-      return new Response(JSON.stringify({ error: error.message }), { status: 400 });
+      return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: corsHeaders });
     }
-    return new Response(JSON.stringify({ message: "Commitment successful" }), { headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ message: "Commitment successful" }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
   }
 });
 
 
-createEvent/index.ts
-
-// createEvent/index.ts – Supabase Edge Function for creating an event
-import { serve } from "https://deno.land/std@0.152.0/http/server.ts";
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
-
-// Get these from your deployment environment
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
-function generateSlug(eventName: string) {
-  const uniqueId = Math.random().toString(36).substring(2, 10);
-  return eventName.toLowerCase().replace(/\s+/g, "-") + "-" + uniqueId;
-}
-
-function constructEmail(username: string, slug: string) {
-  return `${username}.${slug}@mailinator.com`;
-}
-
-serve(async (req) => {
-  if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405 });
-  }
-  try {
-    const body = await req.json();
-    const { eventName, eventDescription, eventDate, eventTime, username, password } = body;
-    if (!eventName || !username) {
-      return new Response(JSON.stringify({ error: "Event name and username are required" }), { status: 400 });
-    }
-    const slug = generateSlug(eventName);
-    const email = constructEmail(username, slug);
-
-    // Create the auth user via the admin API (bypassing email confirmation)
-    const { data: userData, error: userError } = await supabase.auth.admin.createUser({
-      email,
-      password: password || "no-password",
-      email_confirm: true,
-    });
-    if (userError) {
-      return new Response(JSON.stringify({ error: userError.message }), { status: 400 });
-    }
-    const newUser = userData.user;
-
-    // Insert the event record.
-    const { data: eventData, error: eventError } = await supabase
-      .from("events")
-      .insert([{
-        event_name: eventName,
-        slug,
-        created_by: username,
-        event_description: eventDescription || null,
-        event_date: eventDate || null,
-        event_time: eventTime || null,
-      }])
-      .select()
-      .single();
-    if (eventError) {
-      return new Response(JSON.stringify({ error: eventError.message }), { status: 400 });
-    }
-    const eventId = eventData.id;
-
-    // Insert the event-specific user profile.
-    const { data: profileData, error: profileError } = await supabase
-      .from("event_users")
-      .insert([{ id: newUser.id, event_id: eventId, username }])
-      .select()
-      .single();
-    if (profileError) {
-      return new Response(JSON.stringify({ error: profileError.message }), { status: 400 });
-    }
-    return new Response(
-      JSON.stringify({ message: "Event created successfully", slug, token: newUser.id, eventId }),
-      { headers: { "Content-Type": "application/json" } }
-    );
-  } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
-  }
-});
 
 deleteItem/index.ts
 
-// deleteItem/index.ts – Supabase Edge Function to delete an item
+// deleteItem/index.ts – Supabase Edge Function to delete an item with CORS handling
 import { serve } from "https://deno.land/std@0.152.0/http/server.ts";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+// CORS Headers
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
 
 async function getUserId(req: Request): Promise<string | null> {
   const authHeader = req.headers.get("Authorization");
@@ -969,12 +920,16 @@ async function getUserId(req: Request): Promise<string | null> {
 }
 
 serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("OK", { status: 200, headers: corsHeaders });
+  }
+  
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405 });
+    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: corsHeaders });
   }
   const userId = await getUserId(req);
   if (!userId) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
   }
   try {
     const body = await req.json();
@@ -985,7 +940,7 @@ serve(async (req) => {
       .eq("slug", eventSlug)
       .maybeSingle();
     if (!eventData) {
-      return new Response(JSON.stringify({ error: "Event not found" }), { status: 404 });
+      return new Response(JSON.stringify({ error: "Event not found" }), { status: 404, headers: corsHeaders });
     }
     const { data: profile } = await supabase
       .from("event_users")
@@ -994,24 +949,25 @@ serve(async (req) => {
       .eq("event_id", eventData.id)
       .maybeSingle();
     if (!profile || profile.username !== eventData.created_by) {
-      return new Response(JSON.stringify({ error: "Only the event creator can delete items" }), { status: 403 });
+      return new Response(JSON.stringify({ error: "Only the event creator can delete items" }), { status: 403, headers: corsHeaders });
     }
     const { error } = await supabase
       .from("event_items")
       .delete()
       .eq("id", itemId);
     if (error) {
-      return new Response(JSON.stringify({ error: error.message }), { status: 400 });
+      return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: corsHeaders });
     }
-    return new Response(JSON.stringify({ message: "Item deleted" }), { headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ message: "Item deleted" }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
   }
 });
 
+
 event/index.ts
 
-// event/index.ts – Supabase Edge Function to get event details
+// event/index.ts – Supabase Edge Function to get event details with CORS handling
 import { serve } from "https://deno.land/std@0.152.0/http/server.ts";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
@@ -1019,15 +975,30 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+// CORS Headers
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
 serve(async (req) => {
+  // Handle preflight OPTIONS request
+  if (req.method === "OPTIONS") {
+    return new Response("OK", { status: 200, headers: corsHeaders });
+  }
+  
   if (req.method !== "GET") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405 });
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: corsHeaders,
+    });
   }
   try {
     const url = new URL(req.url);
     const slug = url.searchParams.get("slug");
     if (!slug) {
-      return new Response(JSON.stringify({ error: "Slug is required" }), { status: 400 });
+      return new Response(JSON.stringify({ error: "Slug is required" }), { status: 400, headers: corsHeaders });
     }
     const { data: eventData, error: eventError } = await supabase
       .from("events")
@@ -1035,7 +1006,7 @@ serve(async (req) => {
       .eq("slug", slug)
       .single();
     if (eventError || !eventData) {
-      return new Response(JSON.stringify({ error: "Event not found" }), { status: 404 });
+      return new Response(JSON.stringify({ error: "Event not found" }), { status: 404, headers: corsHeaders });
     }
     const { data: commitments } = await supabase
       .from("commitments")
@@ -1047,16 +1018,18 @@ serve(async (req) => {
       .eq("event_id", eventData.id);
     return new Response(
       JSON.stringify({ event: eventData, commitments, users: usersData }),
-      { headers: { "Content-Type": "application/json" } }
+      { headers: { "Content-Type": "application/json", ...corsHeaders } }
     );
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
   }
 });
 
+
 login/index.ts
 
-// login/index.ts – Supabase Edge Function for event login
+
+// login/index.ts – Supabase Edge Function for event login with CORS handling
 import { serve } from "https://deno.land/std@0.152.0/http/server.ts";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
@@ -1064,19 +1037,30 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+// CORS Headers
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
 function constructEmail(username: string, slug: string) {
   return `${username}.${slug}@mailinator.com`;
 }
 
 serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("OK", { status: 200, headers: corsHeaders });
+  }
+  
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405 });
+    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: corsHeaders });
   }
   try {
     const body = await req.json();
     const { username, password, slug } = body;
     if (!username || !slug) {
-      return new Response(JSON.stringify({ error: "Username and slug are required" }), { status: 400 });
+      return new Response(JSON.stringify({ error: "Username and slug are required" }), { status: 400, headers: corsHeaders });
     }
     const email = constructEmail(username, slug);
 
@@ -1094,15 +1078,15 @@ serve(async (req) => {
           email_confirm: true,
         });
         if (signUpError) {
-          return new Response(JSON.stringify({ error: signUpError.message }), { status: 400 });
+          return new Response(JSON.stringify({ error: signUpError.message }), { status: 400, headers: corsHeaders });
         }
       } else {
-        return new Response(JSON.stringify({ error: signInError.message }), { status: 400 });
+        return new Response(JSON.stringify({ error: signInError.message }), { status: 400, headers: corsHeaders });
       }
     }
     const user = signInData.session ? signInData.session.user : null;
     if (!user) {
-      return new Response(JSON.stringify({ error: "User not authenticated" }), { status: 401 });
+      return new Response(JSON.stringify({ error: "User not authenticated" }), { status: 401, headers: corsHeaders });
     }
     // Look up the event ID using the slug.
     const { data: eventRec } = await supabase
@@ -1111,7 +1095,7 @@ serve(async (req) => {
       .eq("slug", slug)
       .maybeSingle();
     if (!eventRec) {
-      return new Response(JSON.stringify({ error: "Event not found" }), { status: 404 });
+      return new Response(JSON.stringify({ error: "Event not found" }), { status: 404, headers: corsHeaders });
     }
     // Check if an event-specific profile exists.
     let { data: profileData } = await supabase
@@ -1127,28 +1111,35 @@ serve(async (req) => {
         .select()
         .single();
       if (newProfileError) {
-        return new Response(JSON.stringify({ error: newProfileError.message }), { status: 400 });
+        return new Response(JSON.stringify({ error: newProfileError.message }), { status: 400, headers: corsHeaders });
       }
     }
     return new Response(
       JSON.stringify({ message: "Login successful", token: user.id }),
-      { headers: { "Content-Type": "application/json" } }
+      { headers: { "Content-Type": "application/json", ...corsHeaders } }
     );
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
   }
 });
 
 
 updateItem/index.ts
 
-// updateItem/index.ts – Supabase Edge Function to update an item
+// updateItem/index.ts – Supabase Edge Function to update an item with CORS handling
 import { serve } from "https://deno.land/std@0.152.0/http/server.ts";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+// CORS Headers
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
 
 async function getUserId(req: Request): Promise<string | null> {
   const authHeader = req.headers.get("Authorization");
@@ -1162,18 +1153,22 @@ async function getUserId(req: Request): Promise<string | null> {
 }
 
 serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("OK", { status: 200, headers: corsHeaders });
+  }
+  
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405 });
+    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: corsHeaders });
   }
   const userId = await getUserId(req);
   if (!userId) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
   }
   try {
     const body = await req.json();
     const { itemId, newItemName, newQuantity, newDescription, eventSlug } = body;
     if (!newItemName || newQuantity <= 0) {
-      return new Response(JSON.stringify({ error: "Invalid item details" }), { status: 400 });
+      return new Response(JSON.stringify({ error: "Invalid item details" }), { status: 400, headers: corsHeaders });
     }
     const { data: eventData } = await supabase
       .from("events")
@@ -1181,7 +1176,7 @@ serve(async (req) => {
       .eq("slug", eventSlug)
       .maybeSingle();
     if (!eventData) {
-      return new Response(JSON.stringify({ error: "Event not found" }), { status: 404 });
+      return new Response(JSON.stringify({ error: "Event not found" }), { status: 404, headers: corsHeaders });
     }
     const { data: profile } = await supabase
       .from("event_users")
@@ -1190,7 +1185,7 @@ serve(async (req) => {
       .eq("event_id", eventData.id)
       .maybeSingle();
     if (!profile || profile.username !== eventData.created_by) {
-      return new Response(JSON.stringify({ error: "Only the event creator can update items" }), { status: 403 });
+      return new Response(JSON.stringify({ error: "Only the event creator can update items" }), { status: 403, headers: corsHeaders });
     }
     // Check total commitments for the item.
     const { data: commitmentsData } = await supabase
@@ -1199,7 +1194,7 @@ serve(async (req) => {
       .eq("item_id", itemId);
     const totalCommitted = commitmentsData?.reduce((sum, c) => sum + c.quantity, 0) || 0;
     if (newQuantity < totalCommitted) {
-      return new Response(JSON.stringify({ error: `Cannot reduce quantity below ${totalCommitted}` }), { status: 400 });
+      return new Response(JSON.stringify({ error: `Cannot reduce quantity below ${totalCommitted}` }), { status: 400, headers: corsHeaders });
     }
     const updateData: any = { item_name: newItemName, quantity_required: newQuantity };
     if (newDescription !== undefined) {
@@ -1210,10 +1205,126 @@ serve(async (req) => {
       .update(updateData)
       .eq("id", itemId);
     if (error) {
-      return new Response(JSON.stringify({ error: error.message }), { status: 400 });
+      return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: corsHeaders });
     }
-    return new Response(JSON.stringify({ message: "Item updated" }), { headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ message: "Item updated" }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
+  }
+});
+
+createEvent/index.ts
+
+// createEvent/index.ts – Supabase Edge Function for creating an event with CORS handling and explicit select
+import { serve } from "https://deno.land/std@0.152.0/http/server.ts";
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+
+// Get these from your deployment environment
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+// CORS Headers
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*", // Adjust as needed for production
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+function generateSlug(eventName: string) {
+  const uniqueId = Math.random().toString(36).substring(2, 10);
+  return eventName.toLowerCase().replace(/\s+/g, "-") + "-" + uniqueId;
+}
+
+function constructEmail(username: string, slug: string) {
+  return `${username}.${slug}@mailinator.com`;
+}
+
+serve(async (req) => {
+  // Handle CORS Preflight Requests
+  if (req.method === "OPTIONS") {
+    return new Response("OK", { status: 200, headers: corsHeaders });
+  }
+
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: corsHeaders,
+    });
+  }
+
+  try {
+    const body = await req.json();
+    const { eventName, eventDescription, eventDate, eventTime, username, password } = body;
+    if (!eventName || !username) {
+      return new Response(JSON.stringify({ error: "Event name and username are required" }), {
+        status: 400,
+        headers: corsHeaders,
+      });
+    }
+    const slug = generateSlug(eventName);
+    const email = constructEmail(username, slug);
+
+    // Create the auth user via the admin API (bypassing email confirmation)
+    const { data: userData, error: userError } = await supabase.auth.admin.createUser({
+      email,
+      password: password || "no-password",
+      email_confirm: true,
+    });
+    if (userError) {
+      return new Response(JSON.stringify({ error: userError.message }), {
+        status: 400,
+        headers: corsHeaders,
+      });
+    }
+    const newUser = userData.user;
+
+    // Insert the event record.
+    // Explicitly select the id and slug so we can return them.
+    const { data: eventData, error: eventError } = await supabase
+      .from("events")
+      .insert([{
+        event_name: eventName,
+        slug,
+        created_by: username,
+        event_description: eventDescription || null,
+        event_date: eventDate || null,
+        event_time: eventTime || null,
+      }])
+      .select("id, slug")
+      .single();
+    if (eventError) {
+      return new Response(JSON.stringify({ error: eventError.message }), {
+        status: 400,
+        headers: corsHeaders,
+      });
+    }
+    const eventId = eventData.id;
+
+    // Insert the event-specific user profile.
+    const { data: profileData, error: profileError } = await supabase
+      .from("event_users")
+      .insert([{ id: newUser.id, event_id: eventId, username }])
+      .select()
+      .single();
+    if (profileError) {
+      return new Response(JSON.stringify({ error: profileError.message }), {
+        status: 400,
+        headers: corsHeaders,
+      });
+    }
+
+    return new Response(
+      JSON.stringify({ message: "Event created successfully", slug, token: newUser.id, eventId }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      }
+    );
+  } catch (err: any) {
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: corsHeaders,
+    });
   }
 });
