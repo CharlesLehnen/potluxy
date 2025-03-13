@@ -21,31 +21,24 @@ async function renderCreateEventForm() {
     <form id="eventForm" class="form">
       <h2>Create New Event</h2>
       <br><br>
-
       <label for="eventName">Event Name:</label>
       <input type="text" id="eventName" required>
       <br><br>
-
       <label for="eventDescription">Event Description (optional):</label>
       <textarea id="eventDescription" placeholder="Enter a description..."></textarea>
       <br><br>
-
       <label for="eventDate">Event Date (optional):</label>
       <input type="date" id="eventDate">
       <br><br>
-
       <label for="eventTime">Event Time (optional):</label>
       <input type="time" id="eventTime">
       <br><br>
-
       <label for="username">Your Event Username:</label>
       <input type="text" id="username" required>
       <br><br>
-
       <label for="password">Password (optional for editing):</label>
       <input type="password" id="password">
       <br><br>
-
       <button type="submit">Create Event</button>
     </form>
   `;
@@ -66,7 +59,7 @@ async function createEvent(e) {
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value.trim();
   if (!eventName || !username) {
-    alert('Event name and username are required.');
+    console.error('Event name and username are required.');
     return;
   }
   const slug = generateSlug(eventName);
@@ -78,13 +71,13 @@ async function createEvent(e) {
     password: password || 'no-password'
   });
   if (signUpError) {
-    alert(`Error signing up: ${signUpError.message}`);
+    console.error(`Error signing up: ${signUpError.message}`);
     return;
   }
   
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   if (sessionError || !sessionData.session) {
-    alert('Error: User not fully authenticated after signup.');
+    console.error('Error: User not fully authenticated after signup.');
     return;
   }
   const userId = sessionData.session.user.id;
@@ -103,7 +96,7 @@ async function createEvent(e) {
     .select()
     .single();
   if (eventError) {
-    alert(`Error creating event: ${eventError.message}`);
+    console.error(`Error creating event: ${eventError.message}`);
     return;
   }
   
@@ -116,12 +109,12 @@ async function createEvent(e) {
     .select()
     .single();
   if (profileError) {
-    alert(`Error creating event user: ${profileError.message}`);
+    console.error(`Error creating event user: ${profileError.message}`);
     return;
   }
   currentUser = profileData;
   
-  alert(`Event created successfully! Share this link: ${location.origin}/#/event/${slug}`);
+  console.log(`Event created successfully! Share this link: ${location.origin}/#/event/${slug}`);
   window.location.hash = `#/event/${slug}`;
   loadEvent(slug);
 }
@@ -136,7 +129,7 @@ async function loadEvent(slug) {
     .eq('slug', slug)
     .single();
   if (eventError || !eventData) {
-    alert('Event not found.');
+    console.error('Event not found.');
     renderCreateEventForm();
     return;
   }
@@ -155,7 +148,7 @@ async function loadEvent(slug) {
       .eq('event_id', currentEvent.id)
       .single();
     if (!profileData) {
-      alert("No event-specific profile found; please sign up for this event.");
+      console.error("No event-specific profile found; please sign up for this event.");
       renderLoginForm(slug);
     } else {
       currentUser = profileData;
@@ -198,12 +191,12 @@ async function handleLogin(e, slug) {
         password: password || 'no-password'
       });
       if (signUpError) {
-        alert(`Error signing up: ${signUpError.message}`);
+        console.error(`Error signing up: ${signUpError.message}`);
         return;
       }
       signInData = signUpData;
     } else {
-      alert(`Error signing in: ${signInError.message}`);
+      console.error(`Error signing in: ${signInError.message}`);
       return;
     }
   }
@@ -222,7 +215,7 @@ async function handleLogin(e, slug) {
       .select()
       .single();
     if (newProfileError) {
-      alert(`Error creating event user: ${newProfileError.message}`);
+      console.error(`Error creating event user: ${newProfileError.message}`);
       return;
     }
     currentUser = newProfile;
@@ -238,23 +231,37 @@ async function handleLogin(e, slug) {
 async function renderEventDashboard() {
   const app = document.getElementById('app');
   const isCreator = currentUser?.username === currentEvent.created_by;
+  let commitmentBreakdownHTML = "";
+  if (isCreator) {
+    commitmentBreakdownHTML = await renderCommitmentBreakdown();
+  }
   const commitmentFormHTML = await renderCommitmentForm();
-  const commitmentBreakdownHTML = isCreator ? await renderCommitmentBreakdown() : '';
   const eventInfoHTML = `
-    ${currentEvent.event_description ? `<p>${currentEvent.event_description}</p>` : ''}
-    ${currentEvent.event_date ? `<p>Date: ${currentEvent.event_date}</p>` : ''}
-    ${currentEvent.event_time ? `<p>Time: ${new Date('1970-01-01T' + currentEvent.event_time + 'Z').toLocaleTimeString()}</p>` : ''}
+    ${currentEvent.event_description ? `<p>${currentEvent.event_description}</p>` : ""}
+    ${currentEvent.event_date ? `<p>Date: ${currentEvent.event_date}</p>` : ""}
+    ${currentEvent.event_time ? `<p>Time: ${new Date("1970-01-01T" + currentEvent.event_time + "Z").toLocaleTimeString()}</p>` : ""}
   `;
-  
+  const shareBlockHTML = `
+    <div class="share-link-block" style="margin-bottom: 2rem; text-align: center;">
+      <p><strong>Share this link with others:</strong></p>
+      <div style="display: flex; justify-content: center; align-items: center; gap: 10px;">
+        <input type="text" id="eventShareURL" value="${location.origin}/#/event/${currentEvent.slug}" readonly style="padding: 6px; width: 60%; border: 1px solid #ccc; border-radius: 4px;">
+        <button id="copyEventLinkBtn" style="padding: 6px 12px;">Copy</button>
+      </div>
+      <span id="copySuccessMsg" style="display:none; color: green; margin-top: 5px;">Link copied!</span>
+    </div>
+  `;
+
+
   app.innerHTML = `
     <h2>${currentEvent.event_name}</h2>
     ${eventInfoHTML}
+    ${isCreator ? shareBlockHTML + commitmentBreakdownHTML : ""}
     <div class="dashboard">
       <div class="items">
         <h3>Items Needed</h3>
         <br><br>
         ${isCreator ? renderManageItems() : renderViewItems()}
-        ${isCreator ? commitmentBreakdownHTML : ''}
       </div>
       <div class="commitments">
         <h3>Your Commitments</h3>
@@ -275,7 +282,7 @@ function renderManageItems() {
       ${currentEvent.items.map(item => `
         <div class="item-card">
           <input type="text" value="${item.item_name}" id="edit-item-${item.id}">
-          <input type="number" value="${item.quantity_required}" id="edit-qty-${item.id}">
+          <input type="number" value="${item.quantity_required}" id="edit-qty-${item.id}" min="1">
           <input type="text" value="${item.item_description || ''}" id="edit-desc-${item.id}" placeholder="Item description (optional)">
           <button onclick="updateItem('${item.id}')">Update</button>
           <button onclick="deleteItem('${item.id}')">Delete</button>
@@ -298,7 +305,7 @@ function renderViewItems() {
   return currentEvent.items.map(item => `
     <div class="item-card">
       <p>${item.item_name} - ${item.quantity_required} needed</p>
-      ${item.item_description ? `<p><em>${item.item_description}</em></p>` : ''}
+      ${item.item_description ? `<p><em>${item.item_description}</em></p>` : ""}
     </div>
   `).join('');
 }
@@ -325,16 +332,15 @@ async function renderCommitmentForm() {
     return `
       <div class="commitment-card">
         <strong style="text-align: center; display: block;">${item.item_name}</strong>
-        <br><br>
         <div>Required: ${item.quantity_required}</div>
         <div>Total Committed: ${totalCommitted}</div>
         <div>Your Commitment: ${yourCommitment}</div>
         <div>
-            <input type="number" id="commit-${item.id}" value="${yourCommitment}" min="0">
+            <input type="number" id="commit-${item.id}" value="${yourCommitment}" min="1">
             Remaining: ${remaining}
             <button onclick="commitItem('${item.id}')">Commit</button>
         </div>
-    </div>
+      </div>
     `;
   }).join('');
 }
@@ -357,6 +363,7 @@ async function renderCommitmentBreakdown() {
     .select('quantity, item_id, user_id')
     .eq('event_id', currentEvent.id);
   if (error) {
+    console.error("Error loading commitment breakdown:", error.message);
     return `<p>Error loading commitment breakdown.</p>`;
   }
   const breakdownByItem = {};
@@ -384,8 +391,8 @@ async function handleAddItem(e) {
   const newItemName = document.getElementById('newItemName').value.trim();
   const newItemQuantity = parseInt(document.getElementById('newItemQuantity').value);
   const newItemDescription = document.getElementById('newItemDescription').value.trim();
-  if (!newItemName || newItemQuantity <= 0) {
-    alert("Please provide a valid item name and quantity.");
+  if (!newItemName || isNaN(newItemQuantity) || newItemQuantity <= 0) {
+    console.error("Please provide a valid item name and a positive integer for quantity.");
     return;
   }
   const insertData = {
@@ -400,23 +407,22 @@ async function handleAddItem(e) {
     .from('event_items')
     .insert([insertData]);
   if (error) {
-    alert("Error adding item: " + error.message);
+    console.error("Error adding item:", error.message);
   } else {
-    alert("Item added!");
     loadEvent(currentEvent.slug);
   }
 }
 
 async function updateItem(itemId) {
   if (currentUser?.username !== currentEvent.created_by) {
-    alert("Only the event creator can update items.");
+    console.error("Only the event creator can update items.");
     return;
   }
   const newItemName = document.getElementById(`edit-item-${itemId}`).value.trim();
   const newQuantity = parseInt(document.getElementById(`edit-qty-${itemId}`).value);
   const newDescription = document.getElementById(`edit-desc-${itemId}`)?.value.trim();
-  if (!newItemName || newQuantity <= 0) {
-    alert("Please provide valid values.");
+  if (!newItemName || isNaN(newQuantity) || newQuantity <= 0) {
+    console.error("Please provide valid values. Quantities must be positive integers.");
     return;
   }
   const { data: commitmentsData } = await supabase
@@ -425,7 +431,7 @@ async function updateItem(itemId) {
     .eq('item_id', itemId);
   const totalCommitted = commitmentsData?.reduce((sum, c) => sum + c.quantity, 0) || 0;
   if (newQuantity < totalCommitted) {
-    alert(`Cannot reduce required quantity to ${newQuantity}. ${totalCommitted} already committed.`);
+    console.error(`Cannot reduce required quantity to ${newQuantity}. ${totalCommitted} already committed.`);
     return;
   }
   const updateData = { item_name: newItemName, quantity_required: newQuantity };
@@ -437,16 +443,15 @@ async function updateItem(itemId) {
     .update(updateData)
     .eq('id', itemId);
   if (error) {
-    alert(`Error updating item: ${error.message}`);
+    console.error(`Error updating item: ${error.message}`);
   } else {
-    alert("Item updated successfully!");
     loadEvent(currentEvent.slug);
   }
 }
 
 async function deleteItem(itemId) {
   if (currentUser?.username !== currentEvent.created_by) {
-    alert("Only the event creator can delete items.");
+    console.error("Only the event creator can delete items.");
     return;
   }
   if (!confirm("Are you sure you want to delete this item? This cannot be undone.")) {
@@ -457,9 +462,8 @@ async function deleteItem(itemId) {
     .delete()
     .eq('id', itemId);
   if (error) {
-    alert(`Error deleting item: ${error.message}`);
+    console.error(`Error deleting item: ${error.message}`);
   } else {
-    alert("Item deleted successfully!");
     loadEvent(currentEvent.slug);
   }
 }
@@ -467,8 +471,8 @@ async function deleteItem(itemId) {
 async function commitItem(itemId) {
   const inputEl = document.getElementById(`commit-${itemId}`);
   const quantity = parseInt(inputEl.value);
-  if (isNaN(quantity) || quantity < 0) {
-    alert("Please enter a valid number for commitment.");
+  if (isNaN(quantity) || quantity <= 0) { // only allow positive integers
+    console.error("Please enter a positive integer for commitment.");
     return;
   }
   const { data: itemData, error: itemError } = await supabase
@@ -477,7 +481,7 @@ async function commitItem(itemId) {
     .eq('id', itemId)
     .single();
   if (itemError || !itemData) {
-    alert(`Error fetching item details: ${itemError?.message}`);
+    console.error(`Error fetching item details: ${itemError?.message}`);
     return;
   }
   const requiredQuantity = itemData.quantity_required;
@@ -495,7 +499,7 @@ async function commitItem(itemId) {
   const myCurrent = myCommitData ? myCommitData.quantity : 0;
   const available = requiredQuantity - (totalCommitted - myCurrent);
   if (quantity > available) {
-    alert(`Cannot commit ${quantity}. Only ${available} slots are available.`);
+    console.error(`Cannot commit ${quantity}. Only ${available} slots are available.`);
     return;
   }
   const { error } = await supabase
@@ -507,9 +511,8 @@ async function commitItem(itemId) {
       quantity
     }], { onConflict: ['event_id', 'user_id', 'item_id'] });
   if (error) {
-    alert(`Error committing item: ${error.message}`);
+    console.error(`Error committing item: ${error.message}`);
   } else {
-    alert('Commitment successful!');
     loadEvent(currentEvent.slug);
   }
 }
@@ -518,7 +521,7 @@ async function commitItem(itemId) {
 // 5. Helper: Attach Commit Listeners (stub)
 // ----------------------
 function attachCommitListeners() {
-  // Inline onclicks in renderCommitmentForm handle commits.
+  // Inline onclick handlers in renderCommitmentForm already handle commitments.
 }
 
 // Expose functions so inline onclick attributes can find them.
