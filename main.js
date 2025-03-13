@@ -240,23 +240,16 @@ async function renderEventDashboard() {
     ${currentEvent.event_description ? `<p>${currentEvent.event_description}</p>` : ""}
     ${currentEvent.event_date ? `<p>Date: ${currentEvent.event_date}</p>` : ""}
     ${currentEvent.event_time ? `<p>Time: ${new Date("1970-01-01T" + currentEvent.event_time + "Z").toLocaleTimeString()}</p>` : ""}
-  `;
-  const shareBlockHTML = `
-    <div class="share-link-block" style="margin-bottom: 2rem; text-align: center;">
-      <p><strong>Share this link with others:</strong></p>
-      <div style="display: flex; justify-content: center; align-items: center; gap: 10px;">
-        <input type="text" id="eventShareURL" value="${location.origin}/#/event/${currentEvent.slug}" readonly style="padding: 6px; width: 60%; border: 1px solid #ccc; border-radius: 4px;">
-        <button id="copyEventLinkBtn" style="padding: 6px 12px;">Copy</button>
-      </div>
-      <span id="copySuccessMsg" style="display:none; color: green; margin-top: 5px;">Link copied!</span>
+    <div id="shareUrlContainer" style="margin-top:10px;">
+      <input type="text" id="shareUrl" value="${location.origin}/#/event/${currentEvent.slug}" readonly style="width:80%;">
+      <button id="copyShareUrl" type="button">Copy URL to Share Event</button>
     </div>
   `;
-
-
+  
   app.innerHTML = `
     <h2>${currentEvent.event_name}</h2>
+    ${isCreator ? commitmentBreakdownHTML : ""}
     ${eventInfoHTML}
-    ${isCreator ? shareBlockHTML + commitmentBreakdownHTML : ""}
     <div class="dashboard">
       <div class="items">
         <h3>Items Needed</h3>
@@ -270,9 +263,22 @@ async function renderEventDashboard() {
       </div>
     </div>
   `;
+  
   if (isCreator) {
     document.getElementById('addItemForm')?.addEventListener('submit', handleAddItem);
   }
+  
+  // Set up the share URL copy functionality.
+  const copyBtn = document.getElementById('copyShareUrl');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      const shareInput = document.getElementById('shareUrl');
+      shareInput.select();
+      document.execCommand('copy');
+      console.log('Share URL copied to clipboard.');
+    });
+  }
+  
   attachCommitListeners();
 }
 
