@@ -1,15 +1,14 @@
 * {
-  margin: 0 0;
-  padding: 0 0;
+  margin: 0;
+  padding: 0;
   box-sizing: border-box;
 }
-
 
 html, body {
   /* height: 100%;
   width: 100%; */
-  margin: 0 0;
-  padding: 0 0;
+  margin: 0;
+  padding: 0;
   background-size: cover;
   font-family: 'HelveticaNeue', 'Arial', sans-serif;
   transition: background-color 0.5s ease;
@@ -24,12 +23,11 @@ h1 {
 
 #formWrapper {
   /* height: 100vh; 
-  width: 100vw;   */
+  width: 100vw; */
   margin: 0;
   padding: 0;
   background-color: rgba(0, 0, 0, 0.3); /* Or any background color you prefer */
 }
-
 
 /* Darkened background when focusing */
 #formWrapper.darken-bg {
@@ -41,19 +39,18 @@ h1 {
   color: #44aacc;
 }
 
-
 h2, h3 {
   color: #2c3e50;
   text-align: center;
 }
 
 .form {
-  background: rgba(255,255,255,0.9);
+  background: rgba(255, 255, 255, 0.9);
   padding: 20px;
   border-radius: 5px;
   max-width: 360px;
   margin: 30px auto;
-  box-shadow: 0 0 10px rgba(0,0,0,0.2);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
 }
 
 .dashboard {
@@ -64,12 +61,12 @@ h2, h3 {
 }
 
 .items, .commitments {
-  background: rgba(255,255,255,0.95);
+  background: rgba(255, 255, 255, 0.95);
   padding: 20px;
   border-radius: 5px;
   flex: 1;
   min-width: 300px;
-  box-shadow: 0 0 10px rgba(0,0,0,0.2);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
 }
 
 .item-card, .commitment-card {
@@ -77,10 +74,13 @@ h2, h3 {
   padding: 10px;
   margin-bottom: 10px;
   border-radius: 5px;
-  box-shadow: 0 0 5px rgba(0,0,0,0.1);
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
 }
 
-input[type="text"], input[type="number"], input[type="password"], textarea {
+input[type="text"],
+input[type="number"],
+input[type="password"],
+textarea {
   width: 100%;
   padding: 8px;
   margin-top: 5px;
@@ -119,8 +119,6 @@ footer {
 .tab-content.active {
   display: block;
 }
-
-
 
 .header-bar {
   display: flex;
@@ -161,16 +159,70 @@ footer {
 /* Google Translate Widget Styling */
 .translate-widget {
   background-color: rgba(255, 255, 255, 0.9);
-  padding: 2.5vh 3vw 2.5vh 0; /* Add right padding */
+  padding: 2.5vh 3vw 2.5vh 0;
   margin-left: auto;
-  border-radius: 0; /* Ensure no rounded corners */
+  border-radius: 0;
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
   transition: background-color 0.5s ease;
-  width: 100vw; /* Full width of viewport */
-  text-align: right; /* Right justify the content */
+  width: 100vw;
+  text-align: right;
 }
 
+/* NEW: Event Info Section Styles */
+.event-info {
+  background: #fff;
+  padding: 15px 20px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  font-size: 1rem;
+  line-height: 1.5;
+}
 
+.event-info p {
+  margin-bottom: 10px;
+  color: #333;
+}
+
+.event-info .event-date,
+.event-info .event-time {
+  font-weight: bold;
+  color: #2c3e50;
+}
+
+#shareUrlContainer {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+}
+
+#shareUrlContainer input {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-right: 10px;
+  font-size: 0.9rem;
+  color: #333;
+}
+
+#shareUrlContainer button {
+  padding: 8px 12px;
+  background-color: #3498db;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background-color 0.3s ease;
+}
+
+#shareUrlContainer button:hover {
+  background-color: #2980b9;
+}
+
+/* About Section (if needed later) */
 .about-wrapper {
   max-width: 700px;
   margin: 30px auto;
@@ -193,4 +245,23 @@ footer {
 
 .about-section p {
   margin-bottom: 15px;
+}
+
+/* Event Title Styling */
+.event-title {
+  padding: 30px 0 20px 0;
+  text-align: center;
+  color: #2c3e50;
+}
+
+/* Centered Event Description */
+.event-description {
+  text-align: center;
+  margin-bottom: 15px;
+  font-size: 1.1rem;
+  color: #444;
+}
+
+#app {
+  padding-bottom: 80px; /* Adds space before footer */
 }

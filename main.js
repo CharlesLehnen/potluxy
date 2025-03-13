@@ -160,7 +160,7 @@ async function loadEvent(slug) {
 function renderLoginForm(slug) {
   const app = document.getElementById('app');
   app.innerHTML = `
-    <h2>${currentEvent.event_name}</h2>
+    <h2 class="event-title">${currentEvent.event_name}</h2>
     <form id="loginForm" class="form">
       <label for="username">Username:</label>
       <input type="text" id="username" required>
@@ -231,30 +231,48 @@ async function handleLogin(e, slug) {
 async function renderEventDashboard() {
   const app = document.getElementById('app');
   const isCreator = currentUser?.username === currentEvent.created_by;
-  let commitmentBreakdownHTML = "";
-  if (isCreator) {
-    commitmentBreakdownHTML = await renderCommitmentBreakdown();
-  }
-  const commitmentFormHTML = await renderCommitmentForm();
+  
+  // Build the event info section with improved aesthetics.
   const eventInfoHTML = `
-    ${currentEvent.event_description ? `<p>${currentEvent.event_description}</p>` : ""}
-    ${currentEvent.event_date ? `<p>Date: ${currentEvent.event_date}</p>` : ""}
-    ${currentEvent.event_time ? `<p>Time: ${new Date("1970-01-01T" + currentEvent.event_time + "Z").toLocaleTimeString()}</p>` : ""}
-    <div id="shareUrlContainer" style="margin-top:10px;">
-      <input type="text" id="shareUrl" value="${location.origin}/#/event/${currentEvent.slug}" readonly style="width:80%;">
-      <button id="copyShareUrl" type="button">Copy URL to Share Event</button>
+    <div class="event-info">
+      ${currentEvent.event_description ? `<p class="event-description">${currentEvent.event_description}</p>` : ""}
+      ${currentEvent.event_date ? `<p class="event-date">Date: ${currentEvent.event_date}</p>` : ""}
+      ${currentEvent.event_time ? `<p class="event-time">Time: ${new Date("1970-01-01T" + currentEvent.event_time + "Z").toLocaleTimeString()}</p>` : ""}
+      <div id="shareUrlContainer" style="margin-top:10px;">
+        <input type="text" id="shareUrl" value="${location.origin}/#/event/${currentEvent.slug}" readonly style="width:80%;">
+        <button id="copyShareUrl" type="button">Copy URL to Share Event</button>
+      </div>
     </div>
   `;
   
+  // For creators, include the commitment breakdown inside the same square as Items Needed.
+  let itemsSectionHTML = "";
+  if (isCreator) {
+    const commitmentBreakdownHTML = await renderCommitmentBreakdown();
+    itemsSectionHTML = `
+      <div class="commitment-breakdown">
+        ${commitmentBreakdownHTML}
+      </div>
+      <h3>Items Needed</h3>
+      <br><br>
+      ${renderManageItems()}
+    `;
+  } else {
+    itemsSectionHTML = `
+      <h3>Items Needed</h3>
+      <br><br>
+      ${renderViewItems()}
+    `;
+  }
+  
+  const commitmentFormHTML = await renderCommitmentForm();
+  
   app.innerHTML = `
-    <h2>${currentEvent.event_name}</h2>
-    ${isCreator ? commitmentBreakdownHTML : ""}
+    <h2 class="event-title">${currentEvent.event_name}</h2>
     ${eventInfoHTML}
     <div class="dashboard">
       <div class="items">
-        <h3>Items Needed</h3>
-        <br><br>
-        ${isCreator ? renderManageItems() : renderViewItems()}
+        ${itemsSectionHTML}
       </div>
       <div class="commitments">
         <h3>Your Commitments</h3>
