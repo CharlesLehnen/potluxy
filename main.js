@@ -238,14 +238,14 @@ async function renderEventDashboard() {
       ${currentEvent.event_description ? `<p class="event-description">${currentEvent.event_description}</p>` : ""}
       ${currentEvent.event_date ? `<p class="event-date">Date: ${currentEvent.event_date}</p>` : ""}
       ${currentEvent.event_time ? `<p class="event-time">Time: ${new Date("1970-01-01T" + currentEvent.event_time + "Z").toLocaleTimeString()}</p>` : ""}
-      <div id="shareUrlContainer" style="margin-top:10px;">
-        <input type="text" id="shareUrl" value="${location.origin}/#/event/${currentEvent.slug}" readonly style="width:80%;">
+      <div id="shareUrlContainer">
+        <input type="text" id="shareUrl" value="${location.origin}/#/event/${currentEvent.slug}" readonly>
         <button id="copyShareUrl" type="button">Copy URL to Share Event</button>
       </div>
     </div>
   `;
   
-  // For creators, include the commitment breakdown inside the same square as Items Needed.
+  // For creators, include the commitment breakdown in the same box as Items Needed.
   let itemsSectionHTML = "";
   if (isCreator) {
     const commitmentBreakdownHTML = await renderCommitmentBreakdown();
@@ -256,6 +256,10 @@ async function renderEventDashboard() {
       <h3>Items Needed</h3>
       <br><br>
       ${renderManageItems()}
+      <div class="csv-actions">
+        <button id="exportCSV" type="button">Export CSV</button>
+        <button id="importCSV" type="button">Import CSV</button>
+      </div>
     `;
   } else {
     itemsSectionHTML = `
@@ -284,6 +288,10 @@ async function renderEventDashboard() {
   
   if (isCreator) {
     document.getElementById('addItemForm')?.addEventListener('submit', handleAddItem);
+    
+    // Set up CSV export/import buttons.
+    document.getElementById('exportCSV').addEventListener('click', exportCSV);
+    document.getElementById('importCSV').addEventListener('click', importCSVFile);
   }
   
   // Set up the share URL copy functionality.
@@ -395,13 +403,19 @@ async function renderCommitmentBreakdown() {
     if (!row) return;
     const itemId = row.item_id;
     const username = row.user_id ? (userLookup[row.user_id] || "Unknown") : "Unknown";
-    if (!breakdownByItem[itemId]) breakdownByItem[itemId] = [];
-    breakdownByItem[itemId].push(`${username}: ${row.quantity}`);
+    if (!breakdownByItem[itemId]) breakdownByItem[itemId] = { lines: [], total: 0 };
+    breakdownByItem[itemId].lines.push(`${username}: ${row.quantity}`);
+    breakdownByItem[itemId].total += parseInt(row.quantity);
   });
   let html = '<h4>Commitment Breakdown</h4>';
   currentEvent.items.forEach(item => {
     if (breakdownByItem[item.id]) {
-      html += `<p><strong>${item.item_name}:</strong> ${breakdownByItem[item.id].join(', ')}</p>`;
+      let warning = "";
+      if (breakdownByItem[item.id].total > item.quantity_required ||
+         (item.quantity_required == 0 && breakdownByItem[item.id].total > 0)) {
+         warning = ` <span style="color:red;font-weight:bold;">OVERCOMMITTED!</span>`;
+      }
+      html += `<p><strong>${item.item_name}:</strong> ${breakdownByItem[item.id].lines.join(', ')}${warning}</p>`;
     }
   });
   return html;
@@ -542,6 +556,246 @@ async function commitItem(itemId) {
 }
 
 // ----------------------
+// CSV Export & Import Functionality
+// ----------------------
+async function exportCSV() {
+  // Query creator's commitments for current event
+  const { data: creatorCommitments } = await supabase
+    .from('commitments')
+    .select('item_id, quantity')
+    .eq('event_id', currentEvent.id)
+    .eq('user_id', currentUser.id);
+  const commitmentMap = {};
+  if (creatorCommitments) {
+    creatorCommitments.forEach(commit => {
+      commitmentMap[commit.item_id] = commit.quantity;
+    });
+  }
+  // Build CSV string with header and a comment line
+  let csvContent = "Item ID,Item Name,Quantity Required,Item Description,Creator Commitment\n";
+  csvContent += "# Do not modify the Item ID column. Items removed from this CSV will have their required quantity set to 0.\n";
+  currentEvent.items.forEach(item => {
+    let cc = commitmentMap[item.id] || "";
+    let row = [
+      item.id,
+      `"${item.item_name}"`,
+      item.quantity_required,
+      `"${item.item_description || ""}"`,
+      cc
+    ].join(",");
+    csvContent += row + "\n";
+  });
+  // Trigger download
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+  link.setAttribute("href", url);
+  link.setAttribute("download", `${currentEvent.slug}_export.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+function importCSVFile() {
+  let input = document.getElementById("csvFileInput");
+  if (!input) {
+    input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".csv";
+    input.id = "csvFileInput";
+    input.style.display = "none";
+    document.body.appendChild(input);
+  }
+  input.click();
+  input.onchange = function(e) {
+    let file = e.target.files[0];
+    if (file) {
+      showImportWarningModal().then(confirmed => {
+        if (confirmed) {
+          readCSVFile(file);
+        }
+      });
+    }
+  };
+}
+
+function showImportWarningModal() {
+  return new Promise((resolve) => {
+    // Create a simple modal overlay
+    const modalOverlay = document.createElement('div');
+    modalOverlay.style.position = 'fixed';
+    modalOverlay.style.top = 0;
+    modalOverlay.style.left = 0;
+    modalOverlay.style.width = '100%';
+    modalOverlay.style.height = '100%';
+    modalOverlay.style.backgroundColor = 'rgba(0,0,0,0.5)';
+    modalOverlay.style.display = 'flex';
+    modalOverlay.style.alignItems = 'center';
+    modalOverlay.style.justifyContent = 'center';
+    modalOverlay.style.zIndex = 1000;
+    
+    const modal = document.createElement('div');
+    modal.style.background = '#fff';
+    modal.style.padding = '20px';
+    modal.style.borderRadius = '8px';
+    modal.style.maxWidth = '400px';
+    modal.style.textAlign = 'center';
+    modal.innerHTML = `
+      <p><strong>Warning:</strong></p>
+      <p>This will overwrite all items in your event based on the CSV file. Existing items (matched by item_id) will be updated; items missing from the CSV will have their required quantity set to 0; and new items will be inserted. Only your (creator's) commitments will be affected. This action cannot be undone.</p>
+      <label><input type="checkbox" id="confirmCheckbox"> I understand and want to proceed.</label>
+      <br><br>
+      <button id="confirmImport">Confirm Import</button>
+      <button id="cancelImport">Cancel</button>
+    `;
+    modalOverlay.appendChild(modal);
+    document.body.appendChild(modalOverlay);
+    
+    document.getElementById('confirmImport').addEventListener('click', () => {
+      if (document.getElementById('confirmCheckbox').checked) {
+        document.body.removeChild(modalOverlay);
+        resolve(true);
+      } else {
+        alert("Please check the box to confirm.");
+      }
+    });
+    document.getElementById('cancelImport').addEventListener('click', () => {
+      document.body.removeChild(modalOverlay);
+      resolve(false);
+    });
+  });
+}
+
+function readCSVFile(file) {
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const csvText = e.target.result;
+    processCSVData(csvText);
+  };
+  reader.readAsText(file);
+}
+
+async function processCSVData(csvText) {
+  const lines = csvText.trim().split("\n");
+  // Skip header lines (assume first non-comment line is header)
+  let headerIndex = 0;
+  while (headerIndex < lines.length && lines[headerIndex].startsWith("#")) {
+    headerIndex++;
+  }
+  if (headerIndex >= lines.length) {
+    console.error("CSV does not contain header.");
+    return;
+  }
+  const headers = lines[headerIndex].split(",").map(h => h.trim());
+  const csvItems = [];
+  for (let i = headerIndex + 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const values = parseCSVLine(line);
+    const rowObj = {};
+    headers.forEach((header, index) => {
+      rowObj[header] = values[index] ? values[index].replace(/^"|"$/g, "") : "";
+    });
+    csvItems.push(rowObj);
+  }
+  await processCSVImport(csvItems);
+}
+
+function parseCSVLine(line) {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+  for (let char of line) {
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      result.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  result.push(current);
+  return result;
+}
+
+async function processCSVImport(csvItems) {
+  // Build a set of item_ids present in CSV.
+  const csvItemIds = new Set();
+  csvItems.forEach(row => {
+    if (row.item_id) csvItemIds.add(row.item_id);
+  });
+  
+  // Map existing items by id.
+  const existingItems = {};
+  currentEvent.items.forEach(item => {
+    existingItems[item.id] = item;
+  });
+  
+  // Process each CSV row.
+  for (let row of csvItems) {
+    if (row.item_id && existingItems[row.item_id]) {
+      // Update existing item.
+      await supabase
+        .from('event_items')
+        .update({
+          item_name: row.item_name,
+          quantity_required: parseInt(row.quantity_required) || 0,
+          item_description: row.item_description || ""
+        })
+        .eq('id', row.item_id);
+      // Update creator's commitment.
+      const creatorCommit = parseInt(row.creator_commitment) || 0;
+      await supabase
+        .from('commitments')
+        .upsert([{
+          event_id: currentEvent.id,
+          user_id: currentUser.id,
+          item_id: row.item_id,
+          quantity: creatorCommit
+        }], { onConflict: ['event_id', 'user_id', 'item_id'] });
+    } else {
+      // Insert new item (ignoring provided item_id if any).
+      const quantityRequired = parseInt(row.quantity_required) || 0;
+      const { data: newItem, error } = await supabase
+        .from('event_items')
+        .insert([{
+          event_id: currentEvent.id,
+          item_name: row.item_name,
+          quantity_required: quantityRequired,
+          item_description: row.item_description || ""
+        }])
+        .select()
+        .single();
+      if (newItem) {
+        const creatorCommit = parseInt(row.creator_commitment) || 0;
+        await supabase
+          .from('commitments')
+          .upsert([{
+            event_id: currentEvent.id,
+            user_id: currentUser.id,
+            item_id: newItem.id,
+            quantity: creatorCommit
+          }], { onConflict: ['event_id', 'user_id', 'item_id'] });
+      }
+    }
+  }
+  
+  // For any existing item not present in CSV, set quantity_required to 0.
+  for (let item of currentEvent.items) {
+    if (!csvItemIds.has(item.id)) {
+      await supabase
+        .from('event_items')
+        .update({ quantity_required: 0 })
+        .eq('id', item.id);
+    }
+  }
+  
+  console.log("CSV import completed.");
+  loadEvent(currentEvent.slug);
+}
+
+// ----------------------
 // 5. Helper: Attach Commit Listeners (stub)
 // ----------------------
 function attachCommitListeners() {
@@ -552,6 +806,8 @@ function attachCommitListeners() {
 window.updateItem = updateItem;
 window.deleteItem = deleteItem;
 window.commitItem = commitItem;
+window.exportCSV = exportCSV;
+window.importCSVFile = importCSVFile;
 
 // ----------------------
 // 6. App Initialization with Hash Routing
