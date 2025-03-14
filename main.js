@@ -256,10 +256,12 @@ async function renderEventDashboard() {
       <h3>Items Needed</h3>
       <br><br>
       ${renderManageItems()}
+      ${ currentEvent.items && currentEvent.items.length > 0 ? `
       <div class="csv-actions">
         <button id="exportCSV" type="button">Export CSV</button>
         <button id="importCSV" type="button">Import CSV</button>
       </div>
+      ` : "" }
     `;
   } else {
     itemsSectionHTML = `
@@ -558,6 +560,8 @@ async function commitItem(itemId) {
 // ----------------------
 // CSV Export & Import Functionality
 // ----------------------
+
+// Export CSV function remains as-is.
 async function exportCSV() {
   // Query creator's commitments for current event
   const { data: creatorCommitments } = await supabase
@@ -596,6 +600,7 @@ async function exportCSV() {
   document.body.removeChild(link);
 }
 
+// Import CSV functions with fixes.
 function importCSVFile() {
   let input = document.getElementById("csvFileInput");
   if (!input) {
@@ -605,6 +610,9 @@ function importCSVFile() {
     input.id = "csvFileInput";
     input.style.display = "none";
     document.body.appendChild(input);
+  } else {
+    // Clear any previous value so onchange fires again.
+    input.value = "";
   }
   input.click();
   input.onchange = function(e) {
@@ -641,13 +649,29 @@ function showImportWarningModal() {
     modal.style.maxWidth = '400px';
     modal.style.textAlign = 'center';
     modal.innerHTML = `
+    <div style="text-align: center;">
       <p><strong>Warning:</strong></p>
-      <p>This will overwrite all items in your event based on the CSV file. Existing items (matched by item_id) will be updated; items missing from the CSV will have their required quantity set to 0; and new items will be inserted. Only your (creator's) commitments will be affected. This action cannot be undone.</p>
-      <label><input type="checkbox" id="confirmCheckbox"> I understand and want to proceed.</label>
-      <br><br>
-      <button id="confirmImport">Confirm Import</button>
-      <button id="cancelImport">Cancel</button>
-    `;
+      <p>This will <strong>overwrite</strong> all item data for this event.</p>
+      <p></p>
+      <ul style="text-align: left; display: inline-block; text-align: left; margin: 10px auto; padding-left: 20px;">
+        <li>The <strong>Item ID</strong> column must not be modified.</li>
+        <li>If a required quantity in the CSV is <em>higher</em> than total commitments for that item, import will fail.</li>
+      </ul>
+      <p><strong>These actions cannot be undone.</strong></p>
+      <div style="margin-top: 20px;">
+        <label>
+          <input type="checkbox" id="confirmCheckbox">
+          I understand and want to proceed.
+        </label>
+      </div>
+      <div style="margin-top: 20px;">
+        <button id="confirmImport">Confirm Import</button>
+        <button id="cancelImport" style="margin-left: 10px;">Cancel</button>
+      </div>
+    </div>
+  `;
+
+
     modalOverlay.appendChild(modal);
     document.body.appendChild(modalOverlay);
     
@@ -706,7 +730,11 @@ async function processCSVData(csvText) {
     headers.forEach((header, index) => {
       rowObj[header] = values[index] ? values[index].replace(/^"|"$/g, "") : "";
     });
-    csvItems.push(rowObj);
+    // Skip the row if all fields are blank
+    const isRowBlank = Object.values(rowObj).every(val => val === "");
+    if (!isRowBlank) {
+      csvItems.push(rowObj);
+    }
   }
   try {
     await processCSVImport(csvItems);
@@ -808,7 +836,6 @@ async function processCSVImport(csvItems) {
   }
   
   console.log("CSV import completed.");
-  // Refresh the event view.
   loadEvent(currentEvent.slug);
 }
 
