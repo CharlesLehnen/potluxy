@@ -164,7 +164,7 @@ function renderLoginForm(slug) {
     <form id="loginForm" class="form">
       <label for="username">Username:</label>
       <input type="text" id="username" required>
-      <label for="password">Password:</label>
+      <label for="password">Password (optional):</label>
       <input type="password" id="password">
       <button type="submit">Login / Sign Up</button>
     </form>
@@ -271,6 +271,7 @@ async function renderEventDashboard() {
     `;
   }
   
+  // Render "Your Commitments" grouped into three sections.
   const commitmentFormHTML = await renderCommitmentForm();
   
   app.innerHTML = `
@@ -344,6 +345,7 @@ function renderViewItems() {
   `).join('');
 }
 
+// Modified to group commitments into three sections.
 async function renderCommitmentForm() {
   const { data: allCommitments } = await supabase
     .from('commitments')
@@ -359,11 +361,16 @@ async function renderCommitmentForm() {
       }
     });
   }
-  return currentEvent.items.map(item => {
+  
+  const committedItems = [];
+  const uncommittedItems = [];
+  const fullyCommittedItems = [];
+  
+  currentEvent.items.forEach(item => {
     const totalCommitted = commitmentTotals[item.id] || 0;
     const yourCommitment = (userCommitments[item.id] === undefined) ? 0 : userCommitments[item.id];
     const remaining = item.quantity_required - totalCommitted;
-    return `
+    const itemHTML = `
       <div class="commitment-card">
         <strong style="text-align: center; display: block;">${item.item_name}</strong>
         <div>Required: ${item.quantity_required}</div>
@@ -376,7 +383,26 @@ async function renderCommitmentForm() {
         </div>
       </div>
     `;
-  }).join('');
+    if (yourCommitment > 0) {
+      committedItems.push(itemHTML);
+    } else if (totalCommitted < item.quantity_required) {
+      uncommittedItems.push(itemHTML);
+    } else {
+      fullyCommittedItems.push(itemHTML);
+    }
+  });
+  
+  let html = "";
+  if (committedItems.length > 0) {
+    html += "<h4>Items You've Committed To</h4>" + committedItems.join('');
+  }
+  if (uncommittedItems.length > 0) {
+    html += "<h4>Items Still Open (Under-committed)</h4>" + uncommittedItems.join('');
+  }
+  if (fullyCommittedItems.length > 0) {
+    html += "<h4>Items Fully Committed</h4>" + fullyCommittedItems.join('');
+  }
+  return html;
 }
 
 async function renderCommitmentBreakdown() {
@@ -561,7 +587,7 @@ async function commitItem(itemId) {
 // CSV Export & Import Functionality
 // ----------------------
 
-// Export CSV function remains as-is.
+// Export CSV function (removed the extra comment line)
 async function exportCSV() {
   // Query creator's commitments for current event
   const { data: creatorCommitments } = await supabase
@@ -575,9 +601,8 @@ async function exportCSV() {
       commitmentMap[commit.item_id] = commit.quantity;
     });
   }
-  // Build CSV string with header and a comment line
+  // Build CSV string with header
   let csvContent = "Item ID,Item Name,Quantity Required,Item Description,Creator Commitment\n";
-  csvContent += "# Do not modify the Item ID column. Items removed from this CSV will have their required quantity set to 0.\n";
   currentEvent.items.forEach(item => {
     let cc = commitmentMap[item.id] || "";
     let row = [
@@ -600,7 +625,6 @@ async function exportCSV() {
   document.body.removeChild(link);
 }
 
-// Import CSV functions with fixes.
 function importCSVFile() {
   let input = document.getElementById("csvFileInput");
   if (!input) {
@@ -652,8 +676,7 @@ function showImportWarningModal() {
     <div style="text-align: center;">
       <p><strong>Warning:</strong></p>
       <p>This will <strong>overwrite</strong> all item data for this event.</p>
-      <p></p>
-      <ul style="text-align: left; display: inline-block; text-align: left; margin: 10px auto; padding-left: 20px;">
+      <ul style="text-align: left; display: inline-block; margin: 10px auto; padding-left: 20px;">
         <li>The <strong>Item ID</strong> column must not be modified.</li>
         <li>If a required quantity in the CSV is <em>higher</em> than total commitments for that item, import will fail.</li>
       </ul>
@@ -670,8 +693,6 @@ function showImportWarningModal() {
       </div>
     </div>
   `;
-
-
     modalOverlay.appendChild(modal);
     document.body.appendChild(modalOverlay);
     
