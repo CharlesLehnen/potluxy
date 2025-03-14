@@ -245,7 +245,7 @@ async function renderEventDashboard() {
     </div>
   `;
   
-  // For creators, include the commitment breakdown in the same box as Items Needed.
+  // For creators, include the commitment breakdown inside the same box as the Items Needed.
   let itemsSectionHTML = "";
   if (isCreator) {
     const commitmentBreakdownHTML = await renderCommitmentBreakdown();
@@ -686,7 +686,17 @@ async function processCSVData(csvText) {
     console.error("CSV does not contain header.");
     return;
   }
-  const headers = lines[headerIndex].split(",").map(h => h.trim());
+  // Normalize headers using a headerMap.
+  const rawHeaders = lines[headerIndex].split(",").map(h => h.trim());
+  const headerMap = {
+    "Item ID": "item_id",
+    "Item Name": "item_name",
+    "Quantity Required": "quantity_required",
+    "Item Description": "item_description",
+    "Creator Commitment": "creator_commitment"
+  };
+  const headers = rawHeaders.map(h => headerMap[h] || h);
+  
   const csvItems = [];
   for (let i = headerIndex + 1; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -698,7 +708,13 @@ async function processCSVData(csvText) {
     });
     csvItems.push(rowObj);
   }
-  await processCSVImport(csvItems);
+  try {
+    await processCSVImport(csvItems);
+  } catch (err) {
+    console.error("CSV import error:", err);
+  } finally {
+    loadEvent(currentEvent.slug);
+  }
 }
 
 function parseCSVLine(line) {
@@ -792,6 +808,7 @@ async function processCSVImport(csvItems) {
   }
   
   console.log("CSV import completed.");
+  // Refresh the event view.
   loadEvent(currentEvent.slug);
 }
 
