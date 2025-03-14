@@ -104,8 +104,9 @@ button:hover {
 }
 
 footer {
-  padding-left: 20px;
-  padding-bottom: 20px;
+  padding-left: 2vw;
+  padding-bottom: 2vh;
+  padding-top: 2vh;
 }
 
 .adsense-slot {
@@ -263,5 +264,5 @@ footer {
 }
 
 #app {
-  padding-bottom: 80px; /* Adds space before footer */
+  padding-bottom: 4vh; /* Adds space before footer */
 }
