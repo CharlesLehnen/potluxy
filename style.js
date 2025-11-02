@@ -1,17 +1,26 @@
-$(document).ready(function () {
-    const formInputs = $('input[type="text"], input[type="password"], input[type="date"], input[type="time"], textarea');
+// style.js
 
-    formInputs.focus(function () {
+$(document).ready(function () {
+    // one selector to rule them all
+    const focusableSelector = 'input[type="text"], input[type="password"], input[type="date"], input[type="time"], textarea';
+
+    // handle focus on *current or future* matching elements
+    $(document).on('focus', focusableSelector, function () {
         $('#formWrapper').addClass('darken-bg');
         $('#google_translate_element').css({
             'background-color': 'rgb(117, 112, 112)',
-            'border-radius': '0',  // Ensure no rounded corners when darkened
+            'border-radius': '0',
             'width': '100vw'
         });
         $('h1').css('color', '#44aacc');
     });
 
-    formInputs.focusout(function () {
+    // handle blur, but only remove the darkening if NOTHING is focused anymore
+    $(document).on('blur', focusableSelector, function () {
+        // check if any matching input is still focused (e.g. user tabbed to the next one)
+        const stillFocused = $(focusableSelector).is(':focus');
+        if (stillFocused) return;
+
         $('#formWrapper').removeClass('darken-bg');
         $('#google_translate_element').css({
             'background-color': 'rgba(255, 255, 255, 0.9)',

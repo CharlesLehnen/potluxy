@@ -1,3 +1,4 @@
+// main.js
 // Import Supabase client and config
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
@@ -6,7 +7,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let currentEvent = null;
 let currentUser = null; // Managed via supabase.auth
-
+  
 // Utility: Construct event-specific email from username and event slug.
 function constructEmail(username, slug) {
   return `${username}.${slug}@mailinator.com`;
@@ -238,23 +239,66 @@ async function handleLogin(e, slug) {
 async function renderEventDashboard() {
   const app = document.getElementById('app');
   const isCreator = currentUser?.username === currentEvent.created_by;
+
+  // event info w/ share link
+  const eventInfoHTML = `
+    <div class="event-info">
+      ${currentEvent.event_description ? `<p class="event-description">${currentEvent.event_description}</p>` : ''}
+      ${currentEvent.event_date ? `<p class="event-date">Date: ${currentEvent.event_date}</p>` : ''}
+      ${currentEvent.event_time ? `<p class="event-time">Time: ${new Date('1970-01-01T' + currentEvent.event_time + 'Z').toLocaleTimeString()}</p>` : ''}
+      <div id="shareUrlContainer">
+        <input type="text" id="shareUrl" value="${location.origin}/#/event/${currentEvent.slug}" readonly>
+        <button id="copyShareUrl" type="button">Copy URL to Share Event</button>
+      </div>
+    </div>
+  `;
+
+  // editable block for creator
+  const eventEditHTML = isCreator ? `
+    <form id="eventDetailsForm" class="form" style="margin-bottom: 1.5rem;">
+      <h3>Edit Event Details</h3>
+      <label for="editEventName">Event Name</label>
+      <input type="text" id="editEventName" value="${currentEvent.event_name}" required>
+
+      <label for="editEventDescription">Event Description</label>
+      <textarea id="editEventDescription" placeholder="Enter a description...">${currentEvent.event_description || ""}</textarea>
+
+      <label for="editEventDate">Event Date</label>
+      <input type="date" id="editEventDate" value="${currentEvent.event_date || ""}">
+
+      <label for="editEventTime">Event Time</label>
+      <input type="time" id="editEventTime" value="${currentEvent.event_time || ""}">
+
+      <button type="submit">Save Event Details</button>
+    </form>
+  ` : '';
+
   const commitmentFormHTML = await renderCommitmentForm();
   const commitmentBreakdownHTML = isCreator ? await renderCommitmentBreakdown() : '';
-  const eventInfoHTML = `
-    ${currentEvent.event_description ? `<p>${currentEvent.event_description}</p>` : ''}
-    ${currentEvent.event_date ? `<p>Date: ${currentEvent.event_date}</p>` : ''}
-    ${currentEvent.event_time ? `<p>Time: ${new Date('1970-01-01T' + currentEvent.event_time + 'Z').toLocaleTimeString()}</p>` : ''}
-  `;
+
+  let itemsSectionHTML = '';
+  if (isCreator) {
+    itemsSectionHTML = `
+      <h3>Items Needed</h3>
+      <br><br>
+      ${renderManageItems()}
+      ${commitmentBreakdownHTML}
+    `;
+  } else {
+    itemsSectionHTML = `
+      <h3>Items Needed</h3>
+      <br><br>
+      ${renderViewItems()}
+    `;
+  }
   
   app.innerHTML = `
-    <h2>${currentEvent.event_name}</h2>
+    <h2 class="event-title">${currentEvent.event_name}</h2>
     ${eventInfoHTML}
+    ${eventEditHTML}
     <div class="dashboard">
       <div class="items">
-        <h3>Items Needed</h3>
-        <br><br>
-        ${isCreator ? renderManageItems() : renderViewItems()}
-        ${isCreator ? commitmentBreakdownHTML : ''}
+        ${itemsSectionHTML}
       </div>
       <div class="commitments">
         <h3>Your Commitments</h3>
@@ -263,9 +307,22 @@ async function renderEventDashboard() {
       </div>
     </div>
   `;
+
   if (isCreator) {
     document.getElementById('addItemForm')?.addEventListener('submit', handleAddItem);
+    document.getElementById('eventDetailsForm')?.addEventListener('submit', handleUpdateEventDetails);
   }
+
+  const copyBtn = document.getElementById('copyShareUrl');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      const shareInput = document.getElementById('shareUrl');
+      shareInput.select();
+      document.execCommand('copy');
+      console.log('Share URL copied to clipboard.');
+    });
+  }
+
   attachCommitListeners();
 }
 
@@ -334,7 +391,7 @@ async function renderCommitmentForm() {
             Remaining: ${remaining}
             <button onclick="commitItem('${item.id}')">Commit</button>
         </div>
-    </div>
+      </div>
     `;
   }).join('');
 }
@@ -512,6 +569,43 @@ async function commitItem(itemId) {
     alert('Commitment successful!');
     loadEvent(currentEvent.slug);
   }
+}
+
+// NEW: creator-only event update handler
+async function handleUpdateEventDetails(e) {
+  e.preventDefault();
+  const nameEl = document.getElementById('editEventName');
+  const descEl = document.getElementById('editEventDescription');
+  const dateEl = document.getElementById('editEventDate');
+  const timeEl = document.getElementById('editEventTime');
+
+  const updatedName = nameEl.value.trim();
+  const updatedDesc = descEl.value.trim();
+  const updatedDate = dateEl.value ? dateEl.value : null;
+  const updatedTime = timeEl.value ? timeEl.value : null;
+
+  if (!updatedName) {
+    alert("Event name is required.");
+    return;
+  }
+
+  const { error } = await supabase
+    .from('events')
+    .update({
+      event_name: updatedName,
+      event_description: updatedDesc || null,
+      event_date: updatedDate,
+      event_time: updatedTime
+    })
+    .eq('id', currentEvent.id);
+
+  if (error) {
+    alert("Error updating event: " + error.message);
+    return;
+  }
+
+  // refresh
+  await loadEvent(currentEvent.slug);
 }
 
 // ----------------------
