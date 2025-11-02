@@ -240,49 +240,35 @@ async function renderEventDashboard() {
   const app = document.getElementById('app');
   const isCreator = currentUser?.username === currentEvent.created_by;
 
-  // event info w/ share link
   const eventInfoHTML = `
     <div class="event-info">
-      ${currentEvent.event_description ? `<p class="event-description">${currentEvent.event_description}</p>` : ''}
-      ${currentEvent.event_date ? `<p class="event-date">Date: ${currentEvent.event_date}</p>` : ''}
-      ${currentEvent.event_time ? `<p class="event-time">Time: ${new Date('1970-01-01T' + currentEvent.event_time + 'Z').toLocaleTimeString()}</p>` : ''}
+      ${currentEvent.event_description ? `<p class="event-description">${currentEvent.event_description}</p>` : ""}
+      ${currentEvent.event_date ? `<p class="event-date">Date: ${currentEvent.event_date}</p>` : ""}
+      ${currentEvent.event_time ? `<p class="event-time">Time: ${new Date("1970-01-01T" + currentEvent.event_time + "Z").toLocaleTimeString()}</p>` : ""}
       <div id="shareUrlContainer">
         <input type="text" id="shareUrl" value="${location.origin}/#/event/${currentEvent.slug}" readonly>
         <button id="copyShareUrl" type="button">Copy URL to Share Event</button>
+        ${isCreator ? `<button id="editEventBtn" type="button" style="margin-left: 10px;">Edit Event</button>` : ""}
       </div>
     </div>
   `;
 
-  // editable block for creator
-  const eventEditHTML = isCreator ? `
-    <form id="eventDetailsForm" class="form" style="margin-bottom: 1.5rem;">
-      <h3>Edit Event Details</h3>
-      <label for="editEventName">Event Name</label>
-      <input type="text" id="editEventName" value="${currentEvent.event_name}" required>
-
-      <label for="editEventDescription">Event Description</label>
-      <textarea id="editEventDescription" placeholder="Enter a description...">${currentEvent.event_description || ""}</textarea>
-
-      <label for="editEventDate">Event Date</label>
-      <input type="date" id="editEventDate" value="${currentEvent.event_date || ""}">
-
-      <label for="editEventTime">Event Time</label>
-      <input type="time" id="editEventTime" value="${currentEvent.event_time || ""}">
-
-      <button type="submit">Save Event Details</button>
-    </form>
-  ` : '';
-
-  const commitmentFormHTML = await renderCommitmentForm();
-  const commitmentBreakdownHTML = isCreator ? await renderCommitmentBreakdown() : '';
-
-  let itemsSectionHTML = '';
+  let itemsSectionHTML = "";
   if (isCreator) {
+    const commitmentBreakdownHTML = await renderCommitmentBreakdown();
     itemsSectionHTML = `
+      <div class="commitment-breakdown">
+        ${commitmentBreakdownHTML}
+      </div>
       <h3>Items Needed</h3>
       <br><br>
       ${renderManageItems()}
-      ${commitmentBreakdownHTML}
+      ${ currentEvent.items && currentEvent.items.length > 0 ? `
+      <div class="csv-actions">
+        <button id="exportCSV" type="button">Export CSV</button>
+        <button id="importCSV" type="button">Import CSV</button>
+      </div>
+      ` : "" }
     `;
   } else {
     itemsSectionHTML = `
@@ -291,11 +277,12 @@ async function renderEventDashboard() {
       ${renderViewItems()}
     `;
   }
-  
+
+  const commitmentFormHTML = await renderCommitmentForm();
+
   app.innerHTML = `
     <h2 class="event-title">${currentEvent.event_name}</h2>
     ${eventInfoHTML}
-    ${eventEditHTML}
     <div class="dashboard">
       <div class="items">
         ${itemsSectionHTML}
@@ -308,11 +295,15 @@ async function renderEventDashboard() {
     </div>
   `;
 
+  // creators: hooks
   if (isCreator) {
     document.getElementById('addItemForm')?.addEventListener('submit', handleAddItem);
-    document.getElementById('eventDetailsForm')?.addEventListener('submit', handleUpdateEventDetails);
+    document.getElementById('exportCSV')?.addEventListener('click', exportCSV);
+    document.getElementById('importCSV')?.addEventListener('click', importCSVFile);
+    document.getElementById('editEventBtn')?.addEventListener('click', showEditEventForm);
   }
 
+  // copy url
   const copyBtn = document.getElementById('copyShareUrl');
   if (copyBtn) {
     copyBtn.addEventListener('click', () => {
@@ -325,6 +316,87 @@ async function renderEventDashboard() {
 
   attachCommitListeners();
 }
+
+function showEditEventForm() {
+  // safety: only event creator
+  if (!currentUser || currentUser.username !== currentEvent.created_by) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'editEventOverlay';
+  overlay.style.position = 'fixed';
+  overlay.style.top = 0;
+  overlay.style.left = 0;
+  overlay.style.width = '100%';
+  overlay.style.height = '100%';
+  overlay.style.backgroundColor = 'rgba(0,0,0,0.5)';
+  overlay.style.display = 'flex';
+  overlay.style.alignItems = 'center';
+  overlay.style.justifyContent = 'center';
+  overlay.style.zIndex = 2000;
+
+  const box = document.createElement('div');
+  box.style.background = '#fff';
+  box.style.padding = '20px';
+  box.style.borderRadius = '8px';
+  box.style.maxWidth = '420px';
+  box.style.width = '90%';
+
+  box.innerHTML = `
+    <h3>Edit Event</h3>
+    <label>Event Name</label>
+    <input type="text" id="editEventName" value="${currentEvent.event_name}" />
+
+    <label style="margin-top:10px;">Event Description</label>
+    <textarea id="editEventDescription">${currentEvent.event_description || ''}</textarea>
+
+    <label style="margin-top:10px;">Event Date</label>
+    <input type="date" id="editEventDate" value="${currentEvent.event_date || ''}" />
+
+    <label style="margin-top:10px;">Event Time</label>
+    <input type="time" id="editEventTime" value="${currentEvent.event_time || ''}" />
+
+    <div style="margin-top:15px; text-align:right;">
+      <button id="saveEventChanges">Save</button>
+      <button id="cancelEventEdit" style="margin-left:8px; background:#ccc; color:#000;">Cancel</button>
+    </div>
+  `;
+
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  document.getElementById('cancelEventEdit').addEventListener('click', closeEditEventForm);
+  document.getElementById('saveEventChanges').addEventListener('click', async () => {
+    const newName = document.getElementById('editEventName').value.trim();
+    const newDesc = document.getElementById('editEventDescription').value.trim();
+    const newDate = document.getElementById('editEventDate').value;
+    const newTime = document.getElementById('editEventTime').value;
+
+    const { error } = await supabase
+      .from('events')
+      .update({
+        event_name: newName,
+        event_description: newDesc || null,
+        event_date: newDate || null,
+        event_time: newTime || null
+      })
+      .eq('id', currentEvent.id);
+
+    if (error) {
+      alert('Error updating event: ' + error.message);
+      return;
+    }
+
+    closeEditEventForm();
+    // reload to show changes
+    loadEvent(currentEvent.slug);
+  });
+}
+
+function closeEditEventForm() {
+  const el = document.getElementById('editEventOverlay');
+  if (el) el.remove();
+}
+
 
 function renderManageItems() {
   return `
