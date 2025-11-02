@@ -1,3 +1,4 @@
+// main.js
 // Import Supabase client and config
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
@@ -6,7 +7,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let currentEvent = null;
 let currentUser = null; // Managed via supabase.auth
-
+  
 // Utility: Construct event-specific email from username and event slug.
 function constructEmail(username, slug) {
   return `${username}.${slug}@mailinator.com`;
@@ -311,6 +312,87 @@ async function renderEventDashboard() {
   attachCommitListeners();
 }
 
+function showEditEventForm() {
+  // safety: only event creator
+  if (!currentUser || currentUser.username !== currentEvent.created_by) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'editEventOverlay';
+  overlay.style.position = 'fixed';
+  overlay.style.top = 0;
+  overlay.style.left = 0;
+  overlay.style.width = '100%';
+  overlay.style.height = '100%';
+  overlay.style.backgroundColor = 'rgba(0,0,0,0.5)';
+  overlay.style.display = 'flex';
+  overlay.style.alignItems = 'center';
+  overlay.style.justifyContent = 'center';
+  overlay.style.zIndex = 2000;
+
+  const box = document.createElement('div');
+  box.style.background = '#fff';
+  box.style.padding = '20px';
+  box.style.borderRadius = '8px';
+  box.style.maxWidth = '420px';
+  box.style.width = '90%';
+
+  box.innerHTML = `
+    <h3>Edit Event</h3>
+    <label>Event Name</label>
+    <input type="text" id="editEventName" value="${currentEvent.event_name}" />
+
+    <label style="margin-top:10px;">Event Description</label>
+    <textarea id="editEventDescription">${currentEvent.event_description || ''}</textarea>
+
+    <label style="margin-top:10px;">Event Date</label>
+    <input type="date" id="editEventDate" value="${currentEvent.event_date || ''}" />
+
+    <label style="margin-top:10px;">Event Time</label>
+    <input type="time" id="editEventTime" value="${currentEvent.event_time || ''}" />
+
+    <div style="margin-top:15px; text-align:right;">
+      <button id="saveEventChanges">Save</button>
+      <button id="cancelEventEdit" style="margin-left:8px; background:#ccc; color:#000;">Cancel</button>
+    </div>
+  `;
+
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  document.getElementById('cancelEventEdit').addEventListener('click', closeEditEventForm);
+  document.getElementById('saveEventChanges').addEventListener('click', async () => {
+    const newName = document.getElementById('editEventName').value.trim();
+    const newDesc = document.getElementById('editEventDescription').value.trim();
+    const newDate = document.getElementById('editEventDate').value;
+    const newTime = document.getElementById('editEventTime').value;
+
+    const { error } = await supabase
+      .from('events')
+      .update({
+        event_name: newName,
+        event_description: newDesc || null,
+        event_date: newDate || null,
+        event_time: newTime || null
+      })
+      .eq('id', currentEvent.id);
+
+    if (error) {
+      alert('Error updating event: ' + error.message);
+      return;
+    }
+
+    closeEditEventForm();
+    // reload to show changes
+    loadEvent(currentEvent.slug);
+  });
+}
+
+function closeEditEventForm() {
+  const el = document.getElementById('editEventOverlay');
+  if (el) el.remove();
+}
+
+
 function renderManageItems() {
   return `
     <div id="itemList">
@@ -581,6 +663,43 @@ async function commitItem(itemId) {
   } else {
     loadEvent(currentEvent.slug);
   }
+}
+
+// NEW: creator-only event update handler
+async function handleUpdateEventDetails(e) {
+  e.preventDefault();
+  const nameEl = document.getElementById('editEventName');
+  const descEl = document.getElementById('editEventDescription');
+  const dateEl = document.getElementById('editEventDate');
+  const timeEl = document.getElementById('editEventTime');
+
+  const updatedName = nameEl.value.trim();
+  const updatedDesc = descEl.value.trim();
+  const updatedDate = dateEl.value ? dateEl.value : null;
+  const updatedTime = timeEl.value ? timeEl.value : null;
+
+  if (!updatedName) {
+    alert("Event name is required.");
+    return;
+  }
+
+  const { error } = await supabase
+    .from('events')
+    .update({
+      event_name: updatedName,
+      event_description: updatedDesc || null,
+      event_date: updatedDate,
+      event_time: updatedTime
+    })
+    .eq('id', currentEvent.id);
+
+  if (error) {
+    alert("Error updating event: " + error.message);
+    return;
+  }
+
+  // refresh
+  await loadEvent(currentEvent.slug);
 }
 
 // ----------------------

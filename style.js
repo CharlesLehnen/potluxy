@@ -1,5 +1,8 @@
+// style.js
+
 $(document).ready(function () {
-    const formInputs = $('input[type="text"], input[type="password"], input[type="date"], input[type="time"], textarea');
+    // one selector to rule them all
+    const focusableSelector = 'input[type="text"], input[type="password"], input[type="date"], input[type="time"], textarea';
 
     // Input focus/blur effects
     formInputs.focus(function () {
@@ -12,7 +15,12 @@ $(document).ready(function () {
         $('h1').css('color', '#44aacc');
     });
 
-    formInputs.focusout(function () {
+    // handle blur, but only remove the darkening if NOTHING is focused anymore
+    $(document).on('blur', focusableSelector, function () {
+        // check if any matching input is still focused (e.g. user tabbed to the next one)
+        const stillFocused = $(focusableSelector).is(':focus');
+        if (stillFocused) return;
+
         $('#formWrapper').removeClass('darken-bg');
         $('#google_translate_element').css({
             'background-color': 'rgba(255, 255, 255, 0.9)',
