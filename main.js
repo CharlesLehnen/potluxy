@@ -7,7 +7,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let currentEvent = null;
 let currentUser = null; // Managed via supabase.auth
-  
+
 // Utility: Construct event-specific email from username and event slug.
 function constructEmail(username, slug) {
   return `${username}.${slug}@mailinator.com`;
@@ -65,7 +65,7 @@ async function createEvent(e) {
   }
   const slug = generateSlug(eventName);
   const email = constructEmail(username, slug);
-  
+
   // Sign up via Supabase Auth.
   const { data: authData, error: signUpError } = await supabase.auth.signUp({
     email,
@@ -75,14 +75,14 @@ async function createEvent(e) {
     console.error(`Error signing up: ${signUpError.message}`);
     return;
   }
-  
+
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   if (sessionError || !sessionData.session) {
     console.error('Error: User not fully authenticated after signup.');
     return;
   }
   const userId = sessionData.session.user.id;
-  
+
   // Create the event.
   const { data: eventData, error: eventError } = await supabase
     .from('events')
@@ -100,9 +100,9 @@ async function createEvent(e) {
     console.error(`Error creating event: ${eventError.message}`);
     return;
   }
-  
+
   const eventId = eventData.id;
-  
+
   // Create event-specific profile.
   const { data: profileData, error: profileError } = await supabase
     .from('event_users')
@@ -114,7 +114,7 @@ async function createEvent(e) {
     return;
   }
   currentUser = profileData;
-  
+
   console.log(`Event created successfully! Share this link: ${location.origin}/#/event/${slug}`);
   window.location.hash = `#/event/${slug}`;
   loadEvent(slug);
@@ -136,7 +136,7 @@ async function loadEvent(slug) {
   }
   currentEvent = eventData;
   currentEvent.items = eventData.event_items || [];
-  
+
   // Check Supabase Auth session.
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) {
@@ -179,16 +179,16 @@ async function handleLogin(e, slug) {
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value.trim();
   const email = constructEmail(username, slug);
-  
+
   // Attempt to sign in
   let { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-    email, 
+    email,
     password: password || 'no-password'
   });
   if (signInError) {
     if (signInError.message.includes("Invalid login credentials")) {
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-        email, 
+        email,
         password: password || 'no-password'
       });
       if (signUpError) {
@@ -201,7 +201,7 @@ async function handleLogin(e, slug) {
       return;
     }
   }
-  
+
   // Fetch (or create) the event-specific profile.
   const { data: profileData } = await supabase
     .from('event_users')
@@ -232,8 +232,8 @@ async function handleLogin(e, slug) {
 async function renderEventDashboard() {
   const app = document.getElementById('app');
   const isCreator = currentUser?.username === currentEvent.created_by;
-  
-  // Build the event info section with improved aesthetics.
+
+  // Build the event info section WITH the edit button for the creator
   const eventInfoHTML = `
     <div class="event-info">
       ${currentEvent.event_description ? `<p class="event-description">${currentEvent.event_description}</p>` : ""}
@@ -242,10 +242,11 @@ async function renderEventDashboard() {
       <div id="shareUrlContainer">
         <input type="text" id="shareUrl" value="${location.origin}/#/event/${currentEvent.slug}" readonly>
         <button id="copyShareUrl" type="button">Copy URL to Share Event</button>
+        ${isCreator ? `<button id="editEventBtn" type="button">Edit Event</button>` : ""}
       </div>
     </div>
   `;
-  
+
   // For creators, include the commitment breakdown inside the same box as the Items Needed.
   let itemsSectionHTML = "";
   if (isCreator) {
@@ -271,10 +272,10 @@ async function renderEventDashboard() {
       ${renderViewItems()}
     `;
   }
-  
-  // Render "Your Commitments" grouped into three sections.
+
+  // Render "Your Commitments"
   const commitmentFormHTML = await renderCommitmentForm();
-  
+
   app.innerHTML = `
     <h2 class="event-title">${currentEvent.event_name}</h2>
     ${eventInfoHTML}
@@ -289,15 +290,22 @@ async function renderEventDashboard() {
       </div>
     </div>
   `;
-  
+
+  // Wire up buttons AFTER render
   if (isCreator) {
     document.getElementById('addItemForm')?.addEventListener('submit', handleAddItem);
-    
-    // Set up CSV export/import buttons.
-    document.getElementById('exportCSV').addEventListener('click', exportCSV);
-    document.getElementById('importCSV').addEventListener('click', importCSVFile);
+
+    const exportBtn = document.getElementById('exportCSV');
+    const importBtn = document.getElementById('importCSV');
+    if (exportBtn) exportBtn.addEventListener('click', exportCSV);
+    if (importBtn) importBtn.addEventListener('click', importCSVFile);
+
+    const editBtn = document.getElementById('editEventBtn');
+    if (editBtn) {
+      editBtn.addEventListener('click', showEditEventForm);
+    }
   }
-  
+
   // Set up the share URL copy functionality.
   const copyBtn = document.getElementById('copyShareUrl');
   if (copyBtn) {
@@ -308,7 +316,7 @@ async function renderEventDashboard() {
       console.log('Share URL copied to clipboard.');
     });
   }
-  
+
   attachCommitListeners();
 }
 
@@ -392,7 +400,6 @@ function closeEditEventForm() {
   if (el) el.remove();
 }
 
-
 function renderManageItems() {
   return `
     <div id="itemList">
@@ -443,11 +450,11 @@ async function renderCommitmentForm() {
       }
     });
   }
-  
+
   const committedItems = [];
   const uncommittedItems = [];
   const fullyCommittedItems = [];
-  
+
   currentEvent.items.forEach(item => {
     const totalCommitted = commitmentTotals[item.id] || 0;
     const yourCommitment = (userCommitments[item.id] === undefined) ? 0 : userCommitments[item.id];
@@ -473,7 +480,7 @@ async function renderCommitmentForm() {
       fullyCommittedItems.push(itemHTML);
     }
   });
-  
+
   let html = "";
   if (committedItems.length > 0) {
     html += "<h4>Items You've Committed To</h4>" + committedItems.join('');
@@ -522,8 +529,8 @@ async function renderCommitmentBreakdown() {
     if (breakdownByItem[item.id]) {
       let warning = "";
       if (breakdownByItem[item.id].total > item.quantity_required ||
-         (item.quantity_required == 0 && breakdownByItem[item.id].total > 0)) {
-         warning = ` <span style="color:red;font-weight:bold;">OVERCOMMITTED!</span>`;
+        (item.quantity_required == 0 && breakdownByItem[item.id].total > 0)) {
+        warning = ` <span style="color:red;font-weight:bold;">OVERCOMMITTED!</span>`;
       }
       html += `<p><strong>${item.item_name}:</strong> ${breakdownByItem[item.id].lines.join(', ')}${warning}</p>`;
     }
@@ -665,7 +672,7 @@ async function commitItem(itemId) {
   }
 }
 
-// NEW: creator-only event update handler
+// NEW: creator-only event update handler (used by overlay, but we also have inline in showEditEventForm)
 async function handleUpdateEventDetails(e) {
   e.preventDefault();
   const nameEl = document.getElementById('editEventName');
@@ -706,7 +713,7 @@ async function handleUpdateEventDetails(e) {
 // CSV Export & Import Functionality
 // ----------------------
 
-// Export CSV function (removed the extra comment line)
+// Export CSV function
 async function exportCSV() {
   // Query creator's commitments for current event
   const { data: creatorCommitments } = await supabase
@@ -784,7 +791,7 @@ function showImportWarningModal() {
     modalOverlay.style.alignItems = 'center';
     modalOverlay.style.justifyContent = 'center';
     modalOverlay.style.zIndex = 1000;
-    
+
     const modal = document.createElement('div');
     modal.style.background = '#fff';
     modal.style.padding = '20px';
@@ -814,7 +821,7 @@ function showImportWarningModal() {
   `;
     modalOverlay.appendChild(modal);
     document.body.appendChild(modalOverlay);
-    
+
     document.getElementById('confirmImport').addEventListener('click', () => {
       if (document.getElementById('confirmCheckbox').checked) {
         document.body.removeChild(modalOverlay);
@@ -860,7 +867,7 @@ async function processCSVData(csvText) {
     "Creator Commitment": "creator_commitment"
   };
   const headers = rawHeaders.map(h => headerMap[h] || h);
-  
+
   const csvItems = [];
   for (let i = headerIndex + 1; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -909,13 +916,13 @@ async function processCSVImport(csvItems) {
   csvItems.forEach(row => {
     if (row.item_id) csvItemIds.add(row.item_id);
   });
-  
+
   // Map existing items by id.
   const existingItems = {};
   currentEvent.items.forEach(item => {
     existingItems[item.id] = item;
   });
-  
+
   // Process each CSV row.
   for (let row of csvItems) {
     if (row.item_id && existingItems[row.item_id]) {
@@ -964,7 +971,7 @@ async function processCSVImport(csvItems) {
       }
     }
   }
-  
+
   // For any existing item not present in CSV, set quantity_required to 0.
   for (let item of currentEvent.items) {
     if (!csvItemIds.has(item.id)) {
@@ -974,7 +981,7 @@ async function processCSVImport(csvItems) {
         .eq('id', item.id);
     }
   }
-  
+
   console.log("CSV import completed.");
   loadEvent(currentEvent.slug);
 }
@@ -992,6 +999,7 @@ window.deleteItem = deleteItem;
 window.commitItem = commitItem;
 window.exportCSV = exportCSV;
 window.importCSVFile = importCSVFile;
+window.showEditEventForm = showEditEventForm; // <-- expose the edit form too
 
 // ----------------------
 // 6. App Initialization with Hash Routing
