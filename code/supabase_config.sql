@@ -12,7 +12,13 @@ CREATE TABLE events (
     created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
     event_description TEXT,
     event_date DATE,
-    event_time TIME
+    event_time TIME,
+
+    -- NEW (2025-11-02): optional location fields
+    event_location TEXT,        -- human-readable, e.g. "123 Main St, San Diego"
+    event_place_id TEXT,        -- Google Places ID (if we got one)
+    event_lat DOUBLE PRECISION, -- optional lat from Places
+    event_lng DOUBLE PRECISION  -- optional lng from Places
 );
 
 ---------------------------
@@ -65,78 +71,111 @@ ALTER TABLE commitments ENABLE ROW LEVEL SECURITY;
 ---------------------------
 
 -- EVENTS: Public SELECT and INSERT are allowed.
-CREATE POLICY "Public select on events" ON events FOR SELECT USING (true);
-CREATE POLICY "Public insert on events" ON events FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public select on events" ON events
+FOR SELECT
+USING (true);
+
+CREATE POLICY "Public insert on events" ON events
+FOR INSERT
+WITH CHECK (true);
 
 -- Only allow UPDATE/DELETE if the current auth user is the creator.
-CREATE POLICY "Event update" ON events FOR UPDATE
+CREATE POLICY "Event update" ON events
+FOR UPDATE
 USING (
     EXISTS (
         SELECT 1 FROM event_users
         WHERE event_users.id = auth.uid()
-        AND event_users.event_id = events.id
-        AND event_users.username = events.created_by
-    )
-);
-CREATE POLICY "Event delete" ON events FOR DELETE
-USING (
-    EXISTS (
-        SELECT 1 FROM event_users
-        WHERE event_users.id = auth.uid()
-        AND event_users.event_id = events.id
-        AND event_users.username = events.created_by
+          AND event_users.event_id = events.id
+          AND event_users.username = events.created_by
     )
 );
 
--- EVENT ITEMS: Public SELECT; for INSERT/UPDATE/DELETE, only allow if current user is the event creator.
-CREATE POLICY "Event items select" ON event_items FOR SELECT USING (
-    EXISTS (SELECT 1 FROM events WHERE events.id = event_items.event_id)
+CREATE POLICY "Event delete" ON events
+FOR DELETE
+USING (
+    EXISTS (
+        SELECT 1 FROM event_users
+        WHERE event_users.id = auth.uid()
+          AND event_users.event_id = events.id
+          AND event_users.username = events.created_by
+    )
 );
-CREATE POLICY "Event items insert" ON event_items FOR INSERT
+
+-- EVENT ITEMS: Public SELECT; for INSERT/UPDATE/DELETE,
+-- only allow if current user is the event creator.
+CREATE POLICY "Event items select" ON event_items
+FOR SELECT
+USING (
+    EXISTS (
+        SELECT 1 FROM events
+        WHERE events.id = event_items.event_id
+    )
+);
+
+CREATE POLICY "Event items insert" ON event_items
+FOR INSERT
 WITH CHECK (
     EXISTS (
         SELECT 1 FROM event_users
         WHERE event_users.id = auth.uid()
-        AND event_users.event_id = event_items.event_id
-        AND event_users.username = (SELECT created_by FROM events WHERE events.id = event_items.event_id)
+          AND event_users.event_id = event_items.event_id
+          AND event_users.username = (
+              SELECT created_by FROM events WHERE events.id = event_items.event_id
+          )
     )
 );
-CREATE POLICY "Event items update" ON event_items FOR UPDATE
+
+CREATE POLICY "Event items update" ON event_items
+FOR UPDATE
 USING (
     EXISTS (
         SELECT 1 FROM event_users
         WHERE event_users.id = auth.uid()
-        AND event_users.event_id = event_items.event_id
-        AND event_users.username = (SELECT created_by FROM events WHERE events.id = event_items.event_id)
+          AND event_users.event_id = event_items.event_id
+          AND event_users.username = (
+              SELECT created_by FROM events WHERE events.id = event_items.event_id
+          )
     )
 );
-CREATE POLICY "Event items delete" ON event_items FOR DELETE
+
+CREATE POLICY "Event items delete" ON event_items
+FOR DELETE
 USING (
     EXISTS (
         SELECT 1 FROM event_users
         WHERE event_users.id = auth.uid()
-        AND event_users.event_id = event_items.event_id
-        AND event_users.username = (SELECT created_by FROM events WHERE events.id = event_items.event_id)
+          AND event_users.event_id = event_items.event_id
+          AND event_users.username = (
+              SELECT created_by FROM events WHERE events.id = event_items.event_id
+          )
     )
 );
 
-CREATE POLICY "Event users select" ON event_users FOR SELECT
-  USING (true);
+-- EVENT USERS
+CREATE POLICY "Event users select" ON event_users
+FOR SELECT
+USING (true);
 
-CREATE POLICY "Event users insert" ON event_users FOR INSERT
+CREATE POLICY "Event users insert" ON event_users
+FOR INSERT
 WITH CHECK (id = auth.uid());
 
 -- COMMITMENTS: Users may only access their own commitments.
-CREATE POLICY "Commitments select" ON commitments FOR SELECT
-  USING (true);
+CREATE POLICY "Commitments select" ON commitments
+FOR SELECT
+USING (true);
 
-CREATE POLICY "Commitments insert" ON commitments FOR INSERT
+CREATE POLICY "Commitments insert" ON commitments
+FOR INSERT
 WITH CHECK (user_id = auth.uid());
 
-CREATE POLICY "Commitments update" ON commitments FOR UPDATE
+CREATE POLICY "Commitments update" ON commitments
+FOR UPDATE
 USING (user_id = auth.uid());
 
-CREATE POLICY "Commitments delete" ON commitments FOR DELETE
+CREATE POLICY "Commitments delete" ON commitments
+FOR DELETE
 USING (user_id = auth.uid());
 
 ---------------------------
@@ -149,11 +188,12 @@ ON commitments
 FOR INSERT
 WITH CHECK (
     quantity <= (
-        SELECT quantity_required - COALESCE((
-            SELECT SUM(quantity)
-            FROM commitments
-            WHERE item_id = commitments.item_id
-        ), 0)
+        SELECT quantity_required
+               - COALESCE((
+                    SELECT SUM(quantity)
+                    FROM commitments
+                    WHERE item_id = commitments.item_id
+                 ), 0)
         FROM event_items
         WHERE id = commitments.item_id
     )
@@ -165,16 +205,16 @@ ON commitments
 FOR UPDATE
 WITH CHECK (
     quantity <= (
-        SELECT quantity_required - COALESCE((
-            SELECT SUM(quantity)
-            FROM commitments
-            WHERE item_id = commitments.item_id
-        ), 0)
+        SELECT quantity_required
+               - COALESCE((
+                    SELECT SUM(quantity)
+                    FROM commitments
+                    WHERE item_id = commitments.item_id
+                 ), 0)
         FROM event_items
         WHERE id = commitments.item_id
     )
 );
-
 
 -- Prevent reducing quantity below existing commitments
 CREATE OR REPLACE FUNCTION prevent_reduce_below_commitment()

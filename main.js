@@ -1,4 +1,4 @@
-// main.js
+// main.js (Google Maps-only link version)
 // Import Supabase client and config
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
@@ -13,6 +13,111 @@ function constructEmail(username, slug) {
   return `${username}.${slug}@mailinator.com`;
 }
 
+// -----------------------------------------------------------------------------
+// OpenStreetMap / Nominatim helpers (no API key needed)
+// -----------------------------------------------------------------------------
+async function osmSearch(query) {
+  if (!query || query.length < 3) return [];
+  const params = new URLSearchParams({
+    q: query,
+    format: 'json',
+    addressdetails: 1,
+    limit: 5,
+  });
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?${params.toString()}`,
+    {
+      headers: {
+        'Accept-Language': 'en',
+      },
+    },
+  );
+  if (!res.ok) return [];
+  return await res.json();
+}
+
+// Lightweight autocomplete dropdown under an input.
+// onSelect(place) gets called with OSM place object.
+function attachOSMAutocomplete(inputEl, onSelect) {
+  if (!inputEl) return;
+
+  const dropdown = document.createElement('div');
+  dropdown.style.position = 'absolute';
+  dropdown.style.background = '#fff';
+  dropdown.style.border = '1px solid #ccc';
+  dropdown.style.zIndex = 1500;
+  dropdown.style.width = inputEl.offsetWidth + 'px';
+  dropdown.style.maxHeight = '180px';
+  dropdown.style.overflowY = 'auto';
+  dropdown.style.display = 'none';
+
+  const wrapper = document.createElement('div');
+  wrapper.style.position = 'relative';
+  inputEl.parentNode.insertBefore(wrapper, inputEl);
+  wrapper.appendChild(inputEl);
+  wrapper.appendChild(dropdown);
+
+  inputEl.addEventListener('input', async () => {
+    const q = inputEl.value.trim();
+    if (q.length < 3) {
+      dropdown.style.display = 'none';
+      return;
+    }
+
+    const results = await osmSearch(q);
+    dropdown.innerHTML = '';
+
+    if (!results.length) {
+      dropdown.style.display = 'none';
+      return;
+    }
+
+    results.forEach((r) => {
+      const item = document.createElement('div');
+      item.textContent = r.display_name;
+      item.style.padding = '6px 8px';
+      item.style.cursor = 'pointer';
+      item.addEventListener('click', () => {
+        inputEl.value = r.display_name;
+        dropdown.style.display = 'none';
+        if (onSelect) {
+          onSelect(r);
+        }
+      });
+      item.addEventListener('mouseenter', () => {
+        item.style.background = '#eee';
+      });
+      item.addEventListener('mouseleave', () => {
+        item.style.background = '#fff';
+      });
+      dropdown.appendChild(item);
+    });
+
+    dropdown.style.display = 'block';
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!wrapper.contains(e.target)) {
+      dropdown.style.display = 'none';
+    }
+  });
+}
+
+// Build a Google Maps link for web/mobile from event's location
+function buildGoogleMapsUrl(evt) {
+  const hasCoords = evt.event_lat && evt.event_lng;
+  if (hasCoords) {
+    // works on mobile + desktop; mobile will often open Maps app
+    return `https://www.google.com/maps/search/?api=1&query=${evt.event_lat},${evt.event_lng}`;
+  }
+  if (evt.event_location) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+      evt.event_location,
+    )}`;
+  }
+  return null;
+}
+
 // ----------------------
 // 1. Event Creation (for creators)
 // ----------------------
@@ -22,28 +127,51 @@ async function renderCreateEventForm() {
     <form id="eventForm" class="form">
       <h2>Create New Event</h2>
       <br><br>
+
       <label for="eventName">Event Name:</label>
       <input type="text" id="eventName" required>
       <br><br>
+
       <label for="eventDescription">Event Description (optional):</label>
       <textarea id="eventDescription" placeholder="Enter a description..."></textarea>
       <br><br>
+
       <label for="eventDate">Event Date (optional):</label>
       <input type="date" id="eventDate">
       <br><br>
+
       <label for="eventTime">Event Time (optional):</label>
       <input type="time" id="eventTime">
       <br><br>
+
+      <label for="eventLocation">Event Location (optional):</label>
+      <input type="text" id="eventLocation" placeholder="Start typing an address...">
+      <input type="hidden" id="eventLocationPlaceId">
+      <input type="hidden" id="eventLocationLat">
+      <input type="hidden" id="eventLocationLng">
+      <br><br>
+
       <label for="username">Your Event Username:</label>
       <input type="text" id="username" required>
       <br><br>
+
       <label for="password">Password (optional for editing):</label>
       <input type="password" id="password">
       <br><br>
+
       <button type="submit">Create Event</button>
     </form>
   `;
   document.getElementById('eventForm').addEventListener('submit', createEvent);
+
+  const locInput = document.getElementById('eventLocation');
+  attachOSMAutocomplete(locInput, (place) => {
+    document.getElementById('eventLocationPlaceId').value = place.osm_id
+      ? `osm:${place.osm_type}:${place.osm_id}`
+      : '';
+    document.getElementById('eventLocationLat').value = place.lat || '';
+    document.getElementById('eventLocationLng').value = place.lon || '';
+  });
 }
 
 function generateSlug(eventName) {
@@ -57,19 +185,26 @@ async function createEvent(e) {
   const eventDescription = document.getElementById('eventDescription').value.trim();
   const eventDate = document.getElementById('eventDate').value;
   const eventTime = document.getElementById('eventTime').value;
+  const eventLocation = document.getElementById('eventLocation').value.trim();
+  const eventLocationPlaceId = document
+    .getElementById('eventLocationPlaceId')
+    .value.trim();
+  const eventLocationLat = document.getElementById('eventLocationLat').value.trim();
+  const eventLocationLng = document.getElementById('eventLocationLng').value.trim();
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value.trim();
+
   if (!eventName || !username) {
     console.error('Event name and username are required.');
     return;
   }
+
   const slug = generateSlug(eventName);
   const email = constructEmail(username, slug);
 
-  // Sign up via Supabase Auth.
   const { data: authData, error: signUpError } = await supabase.auth.signUp({
     email,
-    password: password || 'no-password'
+    password: password || 'no-password',
   });
   if (signUpError) {
     console.error(`Error signing up: ${signUpError.message}`);
@@ -83,19 +218,25 @@ async function createEvent(e) {
   }
   const userId = sessionData.session.user.id;
 
-  // Create the event.
   const { data: eventData, error: eventError } = await supabase
     .from('events')
-    .insert([{
-      event_name: eventName,
-      slug,
-      created_by: username,
-      event_description: eventDescription || null,
-      event_date: eventDate || null,
-      event_time: eventTime || null
-    }])
+    .insert([
+      {
+        event_name: eventName,
+        slug,
+        created_by: username,
+        event_description: eventDescription || null,
+        event_date: eventDate || null,
+        event_time: eventTime || null,
+        event_location: eventLocation || null,
+        event_place_id: eventLocationPlaceId || null,
+        event_lat: eventLocationLat ? Number(eventLocationLat) : null,
+        event_lng: eventLocationLng ? Number(eventLocationLng) : null,
+      },
+    ])
     .select()
     .single();
+
   if (eventError) {
     console.error(`Error creating event: ${eventError.message}`);
     return;
@@ -103,7 +244,6 @@ async function createEvent(e) {
 
   const eventId = eventData.id;
 
-  // Create event-specific profile.
   const { data: profileData, error: profileError } = await supabase
     .from('event_users')
     .insert([{ id: userId, event_id: eventId, username }])
@@ -137,8 +277,9 @@ async function loadEvent(slug) {
   currentEvent = eventData;
   currentEvent.items = eventData.event_items || [];
 
-  // Check Supabase Auth session.
-  const { data: { session } } = await supabase.auth.getSession();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
   if (!session) {
     renderLoginForm(slug);
   } else {
@@ -149,7 +290,7 @@ async function loadEvent(slug) {
       .eq('event_id', currentEvent.id)
       .single();
     if (!profileData) {
-      console.error("No event-specific profile found; please sign up for this event.");
+      console.error('No event-specific profile found; please sign up for this event.');
       renderLoginForm(slug);
     } else {
       currentUser = profileData;
@@ -180,16 +321,15 @@ async function handleLogin(e, slug) {
   const password = document.getElementById('password').value.trim();
   const email = constructEmail(username, slug);
 
-  // Attempt to sign in
   let { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
     email,
-    password: password || 'no-password'
+    password: password || 'no-password',
   });
   if (signInError) {
-    if (signInError.message.includes("Invalid login credentials")) {
+    if (signInError.message.includes('Invalid login credentials')) {
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email,
-        password: password || 'no-password'
+        password: password || 'no-password',
       });
       if (signUpError) {
         console.error(`Error signing up: ${signUpError.message}`);
@@ -202,7 +342,6 @@ async function handleLogin(e, slug) {
     }
   }
 
-  // Fetch (or create) the event-specific profile.
   const { data: profileData } = await supabase
     .from('event_users')
     .select('*')
@@ -233,22 +372,23 @@ async function renderEventDashboard() {
   const app = document.getElementById('app');
   const isCreator = currentUser?.username === currentEvent.created_by;
 
-  // Build the event info section WITH the edit button for the creator
+  const googleMapsUrl = buildGoogleMapsUrl(currentEvent);
+
   const eventInfoHTML = `
     <div class="event-info">
-      ${currentEvent.event_description ? `<p class="event-description">${currentEvent.event_description}</p>` : ""}
-      ${currentEvent.event_date ? `<p class="event-date">Date: ${currentEvent.event_date}</p>` : ""}
-      ${currentEvent.event_time ? `<p class="event-time">Time: ${new Date("1970-01-01T" + currentEvent.event_time + "Z").toLocaleTimeString()}</p>` : ""}
+      ${currentEvent.event_description ? `<p class="event-description">${currentEvent.event_description}</p>` : ''}
+      ${currentEvent.event_date ? `<p class="event-date">Date: ${currentEvent.event_date}</p>` : ''}
+      ${currentEvent.event_time ? `<p class="event-time">Time: ${new Date('1970-01-01T' + currentEvent.event_time + 'Z').toLocaleTimeString()}</p>` : ''}
+      ${currentEvent.event_location ? `<p class="event-location">Location: ${currentEvent.event_location} ${googleMapsUrl ? `(<a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer">open in Google Maps</a>)` : ''}</p>` : ''}
       <div id="shareUrlContainer">
         <input type="text" id="shareUrl" value="${location.origin}/#/event/${currentEvent.slug}" readonly>
         <button id="copyShareUrl" type="button">Copy URL to Share Event</button>
-        ${isCreator ? `<button id="editEventBtn" type="button">Edit Event</button>` : ""}
+        ${isCreator ? `<button id="editEventBtn" type="button">Edit Event</button>` : ''}
       </div>
     </div>
   `;
 
-  // For creators, include the commitment breakdown inside the same box as the Items Needed.
-  let itemsSectionHTML = "";
+  let itemsSectionHTML = '';
   if (isCreator) {
     const commitmentBreakdownHTML = await renderCommitmentBreakdown();
     itemsSectionHTML = `
@@ -258,12 +398,12 @@ async function renderEventDashboard() {
       <h3>Items Needed</h3>
       <br><br>
       ${renderManageItems()}
-      ${ currentEvent.items && currentEvent.items.length > 0 ? `
+      ${currentEvent.items && currentEvent.items.length > 0 ? `
       <div class="csv-actions">
         <button id="exportCSV" type="button">Export CSV</button>
         <button id="importCSV" type="button">Import CSV</button>
       </div>
-      ` : "" }
+      ` : ''}
     `;
   } else {
     itemsSectionHTML = `
@@ -273,7 +413,6 @@ async function renderEventDashboard() {
     `;
   }
 
-  // Render "Your Commitments"
   const commitmentFormHTML = await renderCommitmentForm();
 
   app.innerHTML = `
@@ -291,22 +430,18 @@ async function renderEventDashboard() {
     </div>
   `;
 
-  // Wire up buttons AFTER render
   if (isCreator) {
     document.getElementById('addItemForm')?.addEventListener('submit', handleAddItem);
-
     const exportBtn = document.getElementById('exportCSV');
     const importBtn = document.getElementById('importCSV');
     if (exportBtn) exportBtn.addEventListener('click', exportCSV);
     if (importBtn) importBtn.addEventListener('click', importCSVFile);
-
     const editBtn = document.getElementById('editEventBtn');
     if (editBtn) {
       editBtn.addEventListener('click', showEditEventForm);
     }
   }
 
-  // Set up the share URL copy functionality.
   const copyBtn = document.getElementById('copyShareUrl');
   if (copyBtn) {
     copyBtn.addEventListener('click', () => {
@@ -321,7 +456,6 @@ async function renderEventDashboard() {
 }
 
 function showEditEventForm() {
-  // safety: only event creator
   if (!currentUser || currentUser.username !== currentEvent.created_by) return;
 
   const overlay = document.createElement('div');
@@ -358,6 +492,12 @@ function showEditEventForm() {
     <label style="margin-top:10px;">Event Time</label>
     <input type="time" id="editEventTime" value="${currentEvent.event_time || ''}" />
 
+    <label style="margin-top:10px;">Event Location</label>
+    <input type="text" id="editEventLocation" value="${currentEvent.event_location || ''}" />
+    <input type="hidden" id="editEventLocationPlaceId" value="${currentEvent.event_place_id || ''}" />
+    <input type="hidden" id="editEventLocationLat" value="${currentEvent.event_lat || ''}" />
+    <input type="hidden" id="editEventLocationLng" value="${currentEvent.event_lng || ''}" />
+
     <div style="margin-top:15px; text-align:right;">
       <button id="saveEventChanges">Save</button>
       <button id="cancelEventEdit" style="margin-left:8px; background:#ccc; color:#000;">Cancel</button>
@@ -367,12 +507,25 @@ function showEditEventForm() {
   overlay.appendChild(box);
   document.body.appendChild(overlay);
 
+  const editLocInput = document.getElementById('editEventLocation');
+  attachOSMAutocomplete(editLocInput, (place) => {
+    document.getElementById('editEventLocationPlaceId').value = place.osm_id
+      ? `osm:${place.osm_type}:${place.osm_id}`
+      : '';
+    document.getElementById('editEventLocationLat').value = place.lat || '';
+    document.getElementById('editEventLocationLng').value = place.lon || '';
+  });
+
   document.getElementById('cancelEventEdit').addEventListener('click', closeEditEventForm);
   document.getElementById('saveEventChanges').addEventListener('click', async () => {
     const newName = document.getElementById('editEventName').value.trim();
     const newDesc = document.getElementById('editEventDescription').value.trim();
     const newDate = document.getElementById('editEventDate').value;
     const newTime = document.getElementById('editEventTime').value;
+    const newLoc = document.getElementById('editEventLocation').value.trim();
+    const newLocPlaceId = document.getElementById('editEventLocationPlaceId').value.trim();
+    const newLocLat = document.getElementById('editEventLocationLat').value.trim();
+    const newLocLng = document.getElementById('editEventLocationLng').value.trim();
 
     const { error } = await supabase
       .from('events')
@@ -380,7 +533,11 @@ function showEditEventForm() {
         event_name: newName,
         event_description: newDesc || null,
         event_date: newDate || null,
-        event_time: newTime || null
+        event_time: newTime || null,
+        event_location: newLoc || null,
+        event_place_id: newLocPlaceId || null,
+        event_lat: newLocLat ? Number(newLocLat) : null,
+        event_lng: newLocLng ? Number(newLocLng) : null,
       })
       .eq('id', currentEvent.id);
 
@@ -390,7 +547,6 @@ function showEditEventForm() {
     }
 
     closeEditEventForm();
-    // reload to show changes
     loadEvent(currentEvent.slug);
   });
 }
@@ -403,7 +559,9 @@ function closeEditEventForm() {
 function renderManageItems() {
   return `
     <div id="itemList">
-      ${currentEvent.items.map(item => `
+      ${currentEvent.items
+        .map(
+          (item) => `
         <div class="item-card">
           <input type="text" value="${item.item_name}" id="edit-item-${item.id}">
           <input type="number" value="${item.quantity_required}" id="edit-qty-${item.id}" min="1">
@@ -411,7 +569,9 @@ function renderManageItems() {
           <button onclick="updateItem('${item.id}')">Update</button>
           <button onclick="deleteItem('${item.id}')">Delete</button>
         </div>
-      `).join('')}
+      `,
+        )
+        .join('')}
     </div>
     <form id="addItemForm" class="form">
       <input type="text" id="newItemName" placeholder="Item Name" required>
@@ -426,12 +586,16 @@ function renderViewItems() {
   if (!currentEvent.items || currentEvent.items.length === 0) {
     return `<p>No items listed for this event yet.</p>`;
   }
-  return currentEvent.items.map(item => `
+  return currentEvent.items
+    .map(
+      (item) => `
     <div class="item-card">
       <p>${item.item_name} - ${item.quantity_required} needed</p>
-      ${item.item_description ? `<p><em>${item.item_description}</em></p>` : ""}
+      ${item.item_description ? `<p><em>${item.item_description}</em></p>` : ''}
     </div>
-  `).join('');
+  `,
+    )
+    .join('');
 }
 
 // Modified to group commitments into three sections.
@@ -443,8 +607,9 @@ async function renderCommitmentForm() {
   const commitmentTotals = {};
   const userCommitments = {};
   if (allCommitments) {
-    allCommitments.forEach(commit => {
-      commitmentTotals[commit.item_id] = (commitmentTotals[commit.item_id] || 0) + commit.quantity;
+    allCommitments.forEach((commit) => {
+      commitmentTotals[commit.item_id] =
+        (commitmentTotals[commit.item_id] || 0) + commit.quantity;
       if (currentUser && commit.user_id === currentUser.id) {
         userCommitments[commit.item_id] = commit.quantity;
       }
@@ -455,9 +620,10 @@ async function renderCommitmentForm() {
   const uncommittedItems = [];
   const fullyCommittedItems = [];
 
-  currentEvent.items.forEach(item => {
+  currentEvent.items.forEach((item) => {
     const totalCommitted = commitmentTotals[item.id] || 0;
-    const yourCommitment = (userCommitments[item.id] === undefined) ? 0 : userCommitments[item.id];
+    const yourCommitment =
+      userCommitments[item.id] === undefined ? 0 : userCommitments[item.id];
     const remaining = item.quantity_required - totalCommitted;
     const itemHTML = `
       <div class="commitment-card">
@@ -481,15 +647,15 @@ async function renderCommitmentForm() {
     }
   });
 
-  let html = "";
+  let html = '';
   if (committedItems.length > 0) {
     html += "<h4>Items You've Committed To</h4>" + committedItems.join('');
   }
   if (uncommittedItems.length > 0) {
-    html += "<h4>Items Still Open (Under-committed)</h4>" + uncommittedItems.join('');
+    html += '<h4>Items Still Open (Under-committed)</h4>' + uncommittedItems.join('');
   }
   if (fullyCommittedItems.length > 0) {
-    html += "<h4>Items Fully Committed</h4>" + fullyCommittedItems.join('');
+    html += '<h4>Items Fully Committed</h4>' + fullyCommittedItems.join('');
   }
   return html;
 }
@@ -501,7 +667,7 @@ async function renderCommitmentBreakdown() {
     .eq('event_id', currentEvent.id);
   const userLookup = {};
   if (usersData) {
-    usersData.forEach(user => {
+    usersData.forEach((user) => {
       if (user && user.username) {
         userLookup[user.id] = user.username;
       }
@@ -512,27 +678,31 @@ async function renderCommitmentBreakdown() {
     .select('quantity, item_id, user_id')
     .eq('event_id', currentEvent.id);
   if (error) {
-    console.error("Error loading commitment breakdown:", error.message);
+    console.error('Error loading commitment breakdown:', error.message);
     return `<p>Error loading commitment breakdown.</p>`;
   }
   const breakdownByItem = {};
-  breakdownData.forEach(row => {
+  breakdownData.forEach((row) => {
     if (!row) return;
     const itemId = row.item_id;
-    const username = row.user_id ? (userLookup[row.user_id] || "Unknown") : "Unknown";
+    const username = row.user_id ? userLookup[row.user_id] || 'Unknown' : 'Unknown';
     if (!breakdownByItem[itemId]) breakdownByItem[itemId] = { lines: [], total: 0 };
     breakdownByItem[itemId].lines.push(`${username}: ${row.quantity}`);
     breakdownByItem[itemId].total += parseInt(row.quantity);
   });
   let html = '<h4>Commitment Breakdown</h4>';
-  currentEvent.items.forEach(item => {
+  currentEvent.items.forEach((item) => {
     if (breakdownByItem[item.id]) {
-      let warning = "";
-      if (breakdownByItem[item.id].total > item.quantity_required ||
-        (item.quantity_required == 0 && breakdownByItem[item.id].total > 0)) {
+      let warning = '';
+      if (
+        breakdownByItem[item.id].total > item.quantity_required ||
+        (item.quantity_required == 0 && breakdownByItem[item.id].total > 0)
+      ) {
         warning = ` <span style="color:red;font-weight:bold;">OVERCOMMITTED!</span>`;
       }
-      html += `<p><strong>${item.item_name}:</strong> ${breakdownByItem[item.id].lines.join(', ')}${warning}</p>`;
+      html += `<p><strong>${item.item_name}:</strong> ${breakdownByItem[item.id].lines.join(
+        ', '
+      )}${warning}</p>`;
     }
   });
   return html;
@@ -547,7 +717,7 @@ async function handleAddItem(e) {
   const newItemQuantity = parseInt(document.getElementById('newItemQuantity').value);
   const newItemDescription = document.getElementById('newItemDescription').value.trim();
   if (!newItemName || isNaN(newItemQuantity) || newItemQuantity <= 0) {
-    console.error("Please provide a valid item name and a positive integer for quantity.");
+    console.error('Please provide a valid item name and a positive integer for quantity.');
     return;
   }
   const insertData = {
@@ -558,11 +728,9 @@ async function handleAddItem(e) {
   if (newItemDescription) {
     insertData.item_description = newItemDescription;
   }
-  const { error } = await supabase
-    .from('event_items')
-    .insert([insertData]);
+  const { error } = await supabase.from('event_items').insert([insertData]);
   if (error) {
-    console.error("Error adding item:", error.message);
+    console.error('Error adding item:', error.message);
   } else {
     loadEvent(currentEvent.slug);
   }
@@ -570,14 +738,14 @@ async function handleAddItem(e) {
 
 async function updateItem(itemId) {
   if (currentUser?.username !== currentEvent.created_by) {
-    console.error("Only the event creator can update items.");
+    console.error('Only the event creator can update items.');
     return;
   }
   const newItemName = document.getElementById(`edit-item-${itemId}`).value.trim();
   const newQuantity = parseInt(document.getElementById(`edit-qty-${itemId}`).value);
   const newDescription = document.getElementById(`edit-desc-${itemId}`)?.value.trim();
   if (!newItemName || isNaN(newQuantity) || newQuantity <= 0) {
-    console.error("Please provide valid values. Quantities must be positive integers.");
+    console.error('Please provide valid values. Quantities must be positive integers.');
     return;
   }
   const { data: commitmentsData } = await supabase
@@ -586,17 +754,16 @@ async function updateItem(itemId) {
     .eq('item_id', itemId);
   const totalCommitted = commitmentsData?.reduce((sum, c) => sum + c.quantity, 0) || 0;
   if (newQuantity < totalCommitted) {
-    console.error(`Cannot reduce required quantity to ${newQuantity}. ${totalCommitted} already committed.`);
+    console.error(
+      `Cannot reduce required quantity to ${newQuantity}. ${totalCommitted} already committed.`
+    );
     return;
   }
   const updateData = { item_name: newItemName, quantity_required: newQuantity };
   if (newDescription !== undefined) {
     updateData.item_description = newDescription;
   }
-  const { error } = await supabase
-    .from('event_items')
-    .update(updateData)
-    .eq('id', itemId);
+  const { error } = await supabase.from('event_items').update(updateData).eq('id', itemId);
   if (error) {
     console.error(`Error updating item: ${error.message}`);
   } else {
@@ -606,16 +773,13 @@ async function updateItem(itemId) {
 
 async function deleteItem(itemId) {
   if (currentUser?.username !== currentEvent.created_by) {
-    console.error("Only the event creator can delete items.");
+    console.error('Only the event creator can delete items.');
     return;
   }
-  if (!confirm("Are you sure you want to delete this item? This cannot be undone.")) {
+  if (!confirm('Are you sure you want to delete this item? This cannot be undone.')) {
     return;
   }
-  const { error } = await supabase
-    .from('event_items')
-    .delete()
-    .eq('id', itemId);
+  const { error } = await supabase.from('event_items').delete().eq('id', itemId);
   if (error) {
     console.error(`Error deleting item: ${error.message}`);
   } else {
@@ -626,8 +790,8 @@ async function deleteItem(itemId) {
 async function commitItem(itemId) {
   const inputEl = document.getElementById(`commit-${itemId}`);
   const quantity = parseInt(inputEl.value);
-  if (isNaN(quantity) || quantity <= 0) { // only allow positive integers
-    console.error("Please enter a positive integer for commitment.");
+  if (isNaN(quantity) || quantity <= 0) {
+    console.error('Please enter a positive integer for commitment.');
     return;
   }
   const { data: itemData, error: itemError } = await supabase
@@ -659,12 +823,17 @@ async function commitItem(itemId) {
   }
   const { error } = await supabase
     .from('commitments')
-    .upsert([{
-      event_id: currentEvent.id,
-      user_id: currentUser.id,
-      item_id: itemId,
-      quantity
-    }], { onConflict: ['event_id', 'user_id', 'item_id'] });
+    .upsert(
+      [
+        {
+          event_id: currentEvent.id,
+          user_id: currentUser.id,
+          item_id: itemId,
+          quantity
+        }
+      ],
+      { onConflict: ['event_id', 'user_id', 'item_id'] }
+    );
   if (error) {
     console.error(`Error committing item: ${error.message}`);
   } else {
@@ -672,21 +841,29 @@ async function commitItem(itemId) {
   }
 }
 
-// NEW: creator-only event update handler (used by overlay, but we also have inline in showEditEventForm)
+// creator-only update handler (kept in sync with location)
 async function handleUpdateEventDetails(e) {
   e.preventDefault();
   const nameEl = document.getElementById('editEventName');
   const descEl = document.getElementById('editEventDescription');
   const dateEl = document.getElementById('editEventDate');
   const timeEl = document.getElementById('editEventTime');
+  const locEl = document.getElementById('editEventLocation');
+  const locPlaceEl = document.getElementById('editEventLocationPlaceId');
+  const locLatEl = document.getElementById('editEventLocationLat');
+  const locLngEl = document.getElementById('editEventLocationLng');
 
   const updatedName = nameEl.value.trim();
   const updatedDesc = descEl.value.trim();
   const updatedDate = dateEl.value ? dateEl.value : null;
   const updatedTime = timeEl.value ? timeEl.value : null;
+  const updatedLoc = locEl ? locEl.value.trim() : '';
+  const updatedLocPlace = locPlaceEl ? locPlaceEl.value.trim() : '';
+  const updatedLocLat = locLatEl ? locLatEl.value.trim() : '';
+  const updatedLocLng = locLngEl ? locLngEl.value.trim() : '';
 
   if (!updatedName) {
-    alert("Event name is required.");
+    alert('Event name is required.');
     return;
   }
 
@@ -696,26 +873,26 @@ async function handleUpdateEventDetails(e) {
       event_name: updatedName,
       event_description: updatedDesc || null,
       event_date: updatedDate,
-      event_time: updatedTime
+      event_time: updatedTime,
+      event_location: updatedLoc || null,
+      event_place_id: updatedLocPlace || null,
+      event_lat: updatedLocLat ? Number(updatedLocLat) : null,
+      event_lng: updatedLocLng ? Number(updatedLocLng) : null
     })
     .eq('id', currentEvent.id);
 
   if (error) {
-    alert("Error updating event: " + error.message);
+    alert('Error updating event: ' + error.message);
     return;
   }
 
-  // refresh
   await loadEvent(currentEvent.slug);
 }
 
 // ----------------------
 // CSV Export & Import Functionality
 // ----------------------
-
-// Export CSV function
 async function exportCSV() {
-  // Query creator's commitments for current event
   const { data: creatorCommitments } = await supabase
     .from('commitments')
     .select('item_id, quantity')
@@ -723,52 +900,50 @@ async function exportCSV() {
     .eq('user_id', currentUser.id);
   const commitmentMap = {};
   if (creatorCommitments) {
-    creatorCommitments.forEach(commit => {
+    creatorCommitments.forEach((commit) => {
       commitmentMap[commit.item_id] = commit.quantity;
     });
   }
-  // Build CSV string with header
-  let csvContent = "Item ID,Item Name,Quantity Required,Item Description,Creator Commitment\n";
-  currentEvent.items.forEach(item => {
-    let cc = commitmentMap[item.id] || "";
+  let csvContent =
+    'Item ID,Item Name,Quantity Required,Item Description,Creator Commitment\n';
+  currentEvent.items.forEach((item) => {
+    let cc = commitmentMap[item.id] || '';
     let row = [
       item.id,
       `"${item.item_name}"`,
       item.quantity_required,
-      `"${item.item_description || ""}"`,
+      `"${item.item_description || ''}"`,
       cc
-    ].join(",");
-    csvContent += row + "\n";
+    ].join(',');
+    csvContent += row + '\n';
   });
-  // Trigger download
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement("a");
+  const link = document.createElement('a');
   const url = URL.createObjectURL(blob);
-  link.setAttribute("href", url);
-  link.setAttribute("download", `${currentEvent.slug}_export.csv`);
+  link.setAttribute('href', url);
+  link.setAttribute('download', `${currentEvent.slug}_export.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
 }
 
 function importCSVFile() {
-  let input = document.getElementById("csvFileInput");
+  let input = document.getElementById('csvFileInput');
   if (!input) {
-    input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".csv";
-    input.id = "csvFileInput";
-    input.style.display = "none";
+    input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv';
+    input.id = 'csvFileInput';
+    input.style.display = 'none';
     document.body.appendChild(input);
   } else {
-    // Clear any previous value so onchange fires again.
-    input.value = "";
+    input.value = '';
   }
   input.click();
-  input.onchange = function(e) {
+  input.onchange = function (e) {
     let file = e.target.files[0];
     if (file) {
-      showImportWarningModal().then(confirmed => {
+      showImportWarningModal().then((confirmed) => {
         if (confirmed) {
           readCSVFile(file);
         }
@@ -779,7 +954,6 @@ function importCSVFile() {
 
 function showImportWarningModal() {
   return new Promise((resolve) => {
-    // Create a simple modal overlay
     const modalOverlay = document.createElement('div');
     modalOverlay.style.position = 'fixed';
     modalOverlay.style.top = 0;
@@ -827,7 +1001,7 @@ function showImportWarningModal() {
         document.body.removeChild(modalOverlay);
         resolve(true);
       } else {
-        alert("Please check the box to confirm.");
+        alert('Please check the box to confirm.');
       }
     });
     document.getElementById('cancelImport').addEventListener('click', () => {
@@ -839,7 +1013,7 @@ function showImportWarningModal() {
 
 function readCSVFile(file) {
   const reader = new FileReader();
-  reader.onload = function(e) {
+  reader.onload = function (e) {
     const csvText = e.target.result;
     processCSVData(csvText);
   };
@@ -847,26 +1021,24 @@ function readCSVFile(file) {
 }
 
 async function processCSVData(csvText) {
-  const lines = csvText.trim().split("\n");
-  // Skip header lines (assume first non-comment line is header)
+  const lines = csvText.trim().split('\n');
   let headerIndex = 0;
-  while (headerIndex < lines.length && lines[headerIndex].startsWith("#")) {
+  while (headerIndex < lines.length && lines[headerIndex].startsWith('#')) {
     headerIndex++;
   }
   if (headerIndex >= lines.length) {
-    console.error("CSV does not contain header.");
+    console.error('CSV does not contain header.');
     return;
   }
-  // Normalize headers using a headerMap.
-  const rawHeaders = lines[headerIndex].split(",").map(h => h.trim());
+  const rawHeaders = lines[headerIndex].split(',').map((h) => h.trim());
   const headerMap = {
-    "Item ID": "item_id",
-    "Item Name": "item_name",
-    "Quantity Required": "quantity_required",
-    "Item Description": "item_description",
-    "Creator Commitment": "creator_commitment"
+    'Item ID': 'item_id',
+    'Item Name': 'item_name',
+    'Quantity Required': 'quantity_required',
+    'Item Description': 'item_description',
+    'Creator Commitment': 'creator_commitment'
   };
-  const headers = rawHeaders.map(h => headerMap[h] || h);
+  const headers = rawHeaders.map((h) => headerMap[h] || h);
 
   const csvItems = [];
   for (let i = headerIndex + 1; i < lines.length; i++) {
@@ -875,10 +1047,9 @@ async function processCSVData(csvText) {
     const values = parseCSVLine(line);
     const rowObj = {};
     headers.forEach((header, index) => {
-      rowObj[header] = values[index] ? values[index].replace(/^"|"$/g, "") : "";
+      rowObj[header] = values[index] ? values[index].replace(/^"|"$/g, '') : '';
     });
-    // Skip the row if all fields are blank
-    const isRowBlank = Object.values(rowObj).every(val => val === "");
+    const isRowBlank = Object.values(rowObj).every((val) => val === '');
     if (!isRowBlank) {
       csvItems.push(rowObj);
     }
@@ -886,7 +1057,7 @@ async function processCSVData(csvText) {
   try {
     await processCSVImport(csvItems);
   } catch (err) {
-    console.error("CSV import error:", err);
+    console.error('CSV import error:', err);
   } finally {
     loadEvent(currentEvent.slug);
   }
@@ -894,14 +1065,14 @@ async function processCSVData(csvText) {
 
 function parseCSVLine(line) {
   const result = [];
-  let current = "";
+  let current = '';
   let inQuotes = false;
   for (let char of line) {
     if (char === '"') {
       inQuotes = !inQuotes;
     } else if (char === ',' && !inQuotes) {
       result.push(current);
-      current = "";
+      current = '';
     } else {
       current += char;
     }
@@ -911,68 +1082,74 @@ function parseCSVLine(line) {
 }
 
 async function processCSVImport(csvItems) {
-  // Build a set of item_ids present in CSV.
   const csvItemIds = new Set();
-  csvItems.forEach(row => {
+  csvItems.forEach((row) => {
     if (row.item_id) csvItemIds.add(row.item_id);
   });
 
-  // Map existing items by id.
   const existingItems = {};
-  currentEvent.items.forEach(item => {
+  currentEvent.items.forEach((item) => {
     existingItems[item.id] = item;
   });
 
-  // Process each CSV row.
   for (let row of csvItems) {
     if (row.item_id && existingItems[row.item_id]) {
-      // Update existing item.
       await supabase
         .from('event_items')
         .update({
           item_name: row.item_name,
           quantity_required: parseInt(row.quantity_required) || 0,
-          item_description: row.item_description || ""
+          item_description: row.item_description || ''
         })
         .eq('id', row.item_id);
-      // Update creator's commitment.
+
       const creatorCommit = parseInt(row.creator_commitment) || 0;
       await supabase
         .from('commitments')
-        .upsert([{
-          event_id: currentEvent.id,
-          user_id: currentUser.id,
-          item_id: row.item_id,
-          quantity: creatorCommit
-        }], { onConflict: ['event_id', 'user_id', 'item_id'] });
+        .upsert(
+          [
+            {
+              event_id: currentEvent.id,
+              user_id: currentUser.id,
+              item_id: row.item_id,
+              quantity: creatorCommit
+            }
+          ],
+          { onConflict: ['event_id', 'user_id', 'item_id'] }
+        );
     } else {
-      // Insert new item (ignoring provided item_id if any).
       const quantityRequired = parseInt(row.quantity_required) || 0;
       const { data: newItem, error } = await supabase
         .from('event_items')
-        .insert([{
-          event_id: currentEvent.id,
-          item_name: row.item_name,
-          quantity_required: quantityRequired,
-          item_description: row.item_description || ""
-        }])
+        .insert([
+          {
+            event_id: currentEvent.id,
+            item_name: row.item_name,
+            quantity_required: quantityRequired,
+            item_description: row.item_description || ''
+          }
+        ])
         .select()
         .single();
       if (newItem) {
         const creatorCommit = parseInt(row.creator_commitment) || 0;
         await supabase
           .from('commitments')
-          .upsert([{
-            event_id: currentEvent.id,
-            user_id: currentUser.id,
-            item_id: newItem.id,
-            quantity: creatorCommit
-          }], { onConflict: ['event_id', 'user_id', 'item_id'] });
+          .upsert(
+            [
+              {
+                event_id: currentEvent.id,
+                user_id: currentUser.id,
+                item_id: newItem.id,
+                quantity: creatorCommit
+              }
+            ],
+            { onConflict: ['event_id', 'user_id', 'item_id'] }
+          );
       }
     }
   }
 
-  // For any existing item not present in CSV, set quantity_required to 0.
   for (let item of currentEvent.items) {
     if (!csvItemIds.has(item.id)) {
       await supabase
@@ -982,7 +1159,7 @@ async function processCSVImport(csvItems) {
     }
   }
 
-  console.log("CSV import completed.");
+  console.log('CSV import completed.');
   loadEvent(currentEvent.slug);
 }
 
@@ -999,15 +1176,15 @@ window.deleteItem = deleteItem;
 window.commitItem = commitItem;
 window.exportCSV = exportCSV;
 window.importCSVFile = importCSVFile;
-window.showEditEventForm = showEditEventForm; // <-- expose the edit form too
+window.showEditEventForm = showEditEventForm;
 
 // ----------------------
 // 6. App Initialization with Hash Routing
 // ----------------------
 window.addEventListener('DOMContentLoaded', async () => {
   let slug = null;
-  if (window.location.hash && window.location.hash.startsWith("#/event/")) {
-    slug = window.location.hash.split("#/event/")[1];
+  if (window.location.hash && window.location.hash.startsWith('#/event/')) {
+    slug = window.location.hash.split('#/event/')[1];
   }
   if (slug) {
     await loadEvent(slug);
