@@ -65,50 +65,111 @@
 </head>
 
 <body>
+  <!-- Header Bar with Tabs + Translate -->
   <!-- Google Translate Widget -->
   <div id="google_translate_element" class="translate-widget"></div>
+  
+  <div class="header-bar">
+    <div class="nav-tabs">
+      <button class="tab-button active" data-tab="plan">Plan an Event</button>
+      <button class="tab-button" data-tab="about">About</button>
+    </div>
+  </div>
 
-  <!-- Main Wrapper -->
-  <div id="formWrapper">
-    <header class="logo">
-      <h1>Potluxy&trade;</h1>
-      <p style="text-align: center;"><i>Your ultimate tool to organize items for any group event.</i></p>
-    </header>
 
-    <main id="app">
-      <section aria-label="User Login Form">
-        <h2>Get Started with Your Event</h2>
-        <form id="loginForm" class="form" method="post" action="#">
-          <div class="form-item">
-            <label for="username" class="formLabel">Username</label>
-            <input type="text" id="username" class="form-style" autocomplete="off" required aria-required="true">
-          </div>
+  <!-- Tab: Plan an Event -->
+  <div id="tab-plan" class="tab-content active">
+    <div id="formWrapper">
+      <header class="logo">
+        <h1>Potluxy&trade;</h1>
+        <p style="text-align: center;"><i>Your ultimate tool to organize items for any group event.</i></p>
+      </header>
 
-          <div class="form-item">
-            <label for="password" class="formLabel">Password</label>
-            <input type="password" id="password" class="form-style" required aria-required="true">
-          </div>
+      <main id="app">
+        <section aria-label="User Login Form">
+          <h2>Get Started with Your Event</h2>
+          <form id="loginForm" class="form" method="post" action="#">
+            <div class="form-item">
+              <label for="username" class="formLabel">Username</label>
+              <input type="text" id="username" class="form-style" autocomplete="off" required aria-required="true">
+            </div>
+            <div class="form-item">
+              <label for="password" class="formLabel">Password</label>
+              <input type="password" id="password" class="form-style" required aria-required="true">
+            </div>
+            <div class="form-item">
+              <button type="submit" class="login">Log In</button>
+            </div>
+          </form>
+        </section>
 
-          <div class="form-item">
-            <button type="submit" class="login">Log In</button>
-          </div>
-        </form>
-      </section>
+        <section aria-label="How It Works">
+          <h2>How It Works</h2>
+          <ul>
+            <li>Create an event for your group gathering.</li>
+            <li>List items needed (food, supplies, etc.).</li>
+            <ul>
+              <li><i>For bulk editing, CSV import/export available.</i></li>
+            </ul>
+            <li>Guests can commit to bringing what they choose.</li>
+            <li>Track everything in one convenient place!</li>
+          </ul>
+        </section>
+      </main>
+    </div>
+  </div>
 
-      <section aria-label="How It Works">
-        <h2>How It Works</h2>
-        <ul>
-          <li>Create an event for your group gathering.</li>
-          <li>List items needed (food, supplies, etc.).</li>
-          <li>Guests can commit to bringing what they choose.</li>
-          <li>Track everything in one convenient place!</li>
+  <!-- Tab: About -->
+  <div id="tab-about" class="tab-content">
+    <div class="about-wrapper">
+      <section id="about" class="about-section" aria-label="About Potluxy">
+        <h2>About Potluxy</h2>
+        <p>
+            Potluxy is <strong>100% free</strong> and doesn't require logins for guests. Just share your event link and let everyone choose what they’re bringing.
+        </p>
+        <p>
+          Whenever you need multiple people to bring different items to an event, think Potluxy!
+          Potluxy is a free tool event coordination tool.
+          Whether you're planning a <strong>dinner party</strong>, organizing a festive <strong>Friendsgiving</strong>,
+          or coordinating a <strong>camping trip</strong>, Potluxy makes it simple.
+        </p>
+
+        <h3>How It Works</h3>
+          <ul style="text-indent: 5.5em; list-style-type: none;">
+            <li>- <em>Create an event</em> for your group gathering.</li>
+            <li>- <em>List items</em> needed (food, supplies, etc.).*</li>
+            <li>- <em>Share</em> the event's unique URL with guests.</li>
+            <li>- Guests can <em>commit to bringing</em> what they choose.</li>
+            <li>- <em>Track</em> everything in one place.</li>
+          </ul>
+          <p style="text-indent: 8em;"><i>*For bulk editing, CSV import/export available.</i></p>
+        
+        <br><br>
+        <h3>Perfect For:</h3>
+        <ul style="text-indent: 5.5em; list-style-type: none;">
+          <li><strong>Holiday gatherings</strong> with friends or family</li>
+          <li><strong>Celebrations</strong> and dinner parties</li>
+          <li><strong>Boardgame</strong> nights or LAN parties</li>
+          <li><strong>Picnics</strong> and days at the beach</li>
+          <li><strong>Office</strong> and team-building event</li>
+          <li><strong>Backpacking trips</strong> and outdoor community events</li>
         </ul>
-      </section>
 
-      <!-- AdSense Ad Slot -->
-      <!-- <aside> -->
-      <!-- </aside> -->
-    </main>
+        <p>
+          No more duplicates or last-minute surprises!
+        </p>
+
+        <p>
+          Try Potluxy and simplify your group planning experience.
+        </p>
+      </section>
+    </div>
+  </div>
+
+
+  
+
+  
 
     <footer>
       <p>&copy; 2025 Potluxy. All rights reserved.</p>
