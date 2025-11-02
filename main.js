@@ -22,31 +22,24 @@ async function renderCreateEventForm() {
     <form id="eventForm" class="form">
       <h2>Create New Event</h2>
       <br><br>
-
       <label for="eventName">Event Name:</label>
       <input type="text" id="eventName" required>
       <br><br>
-
       <label for="eventDescription">Event Description (optional):</label>
       <textarea id="eventDescription" placeholder="Enter a description..."></textarea>
       <br><br>
-
       <label for="eventDate">Event Date (optional):</label>
       <input type="date" id="eventDate">
       <br><br>
-
       <label for="eventTime">Event Time (optional):</label>
       <input type="time" id="eventTime">
       <br><br>
-
       <label for="username">Your Event Username:</label>
       <input type="text" id="username" required>
       <br><br>
-
       <label for="password">Password (optional for editing):</label>
       <input type="password" id="password">
       <br><br>
-
       <button type="submit">Create Event</button>
     </form>
   `;
@@ -67,7 +60,7 @@ async function createEvent(e) {
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value.trim();
   if (!eventName || !username) {
-    alert('Event name and username are required.');
+    console.error('Event name and username are required.');
     return;
   }
   const slug = generateSlug(eventName);
@@ -79,13 +72,13 @@ async function createEvent(e) {
     password: password || 'no-password'
   });
   if (signUpError) {
-    alert(`Error signing up: ${signUpError.message}`);
+    console.error(`Error signing up: ${signUpError.message}`);
     return;
   }
   
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   if (sessionError || !sessionData.session) {
-    alert('Error: User not fully authenticated after signup.');
+    console.error('Error: User not fully authenticated after signup.');
     return;
   }
   const userId = sessionData.session.user.id;
@@ -104,7 +97,7 @@ async function createEvent(e) {
     .select()
     .single();
   if (eventError) {
-    alert(`Error creating event: ${eventError.message}`);
+    console.error(`Error creating event: ${eventError.message}`);
     return;
   }
   
@@ -117,12 +110,12 @@ async function createEvent(e) {
     .select()
     .single();
   if (profileError) {
-    alert(`Error creating event user: ${profileError.message}`);
+    console.error(`Error creating event user: ${profileError.message}`);
     return;
   }
   currentUser = profileData;
   
-  alert(`Event created successfully! Share this link: ${location.origin}/#/event/${slug}`);
+  console.log(`Event created successfully! Share this link: ${location.origin}/#/event/${slug}`);
   window.location.hash = `#/event/${slug}`;
   loadEvent(slug);
 }
@@ -137,7 +130,7 @@ async function loadEvent(slug) {
     .eq('slug', slug)
     .single();
   if (eventError || !eventData) {
-    alert('Event not found.');
+    console.error('Event not found.');
     renderCreateEventForm();
     return;
   }
@@ -156,7 +149,7 @@ async function loadEvent(slug) {
       .eq('event_id', currentEvent.id)
       .single();
     if (!profileData) {
-      alert("No event-specific profile found; please sign up for this event.");
+      console.error("No event-specific profile found; please sign up for this event.");
       renderLoginForm(slug);
     } else {
       currentUser = profileData;
@@ -168,11 +161,11 @@ async function loadEvent(slug) {
 function renderLoginForm(slug) {
   const app = document.getElementById('app');
   app.innerHTML = `
-    <h2>${currentEvent.event_name}</h2>
+    <h2 class="event-title">${currentEvent.event_name}</h2>
     <form id="loginForm" class="form">
       <label for="username">Username:</label>
       <input type="text" id="username" required>
-      <label for="password">Password:</label>
+      <label for="password">Password (optional):</label>
       <input type="password" id="password">
       <button type="submit">Login / Sign Up</button>
     </form>
@@ -199,12 +192,12 @@ async function handleLogin(e, slug) {
         password: password || 'no-password'
       });
       if (signUpError) {
-        alert(`Error signing up: ${signUpError.message}`);
+        console.error(`Error signing up: ${signUpError.message}`);
         return;
       }
       signInData = signUpData;
     } else {
-      alert(`Error signing in: ${signInError.message}`);
+      console.error(`Error signing in: ${signInError.message}`);
       return;
     }
   }
@@ -223,7 +216,7 @@ async function handleLogin(e, slug) {
       .select()
       .single();
     if (newProfileError) {
-      alert(`Error creating event user: ${newProfileError.message}`);
+      console.error(`Error creating event user: ${newProfileError.message}`);
       return;
     }
     currentUser = newProfile;
@@ -239,7 +232,8 @@ async function handleLogin(e, slug) {
 async function renderEventDashboard() {
   const app = document.getElementById('app');
   const isCreator = currentUser?.username === currentEvent.created_by;
-
+  
+  // Build the event info section with improved aesthetics.
   const eventInfoHTML = `
     <div class="event-info">
       ${currentEvent.event_description ? `<p class="event-description">${currentEvent.event_description}</p>` : ""}
@@ -248,11 +242,11 @@ async function renderEventDashboard() {
       <div id="shareUrlContainer">
         <input type="text" id="shareUrl" value="${location.origin}/#/event/${currentEvent.slug}" readonly>
         <button id="copyShareUrl" type="button">Copy URL to Share Event</button>
-        ${isCreator ? `<button id="editEventBtn" type="button" style="margin-left: 10px;">Edit Event</button>` : ""}
       </div>
     </div>
   `;
-
+  
+  // For creators, include the commitment breakdown inside the same box as the Items Needed.
   let itemsSectionHTML = "";
   if (isCreator) {
     const commitmentBreakdownHTML = await renderCommitmentBreakdown();
@@ -277,9 +271,10 @@ async function renderEventDashboard() {
       ${renderViewItems()}
     `;
   }
-
+  
+  // Render "Your Commitments" grouped into three sections.
   const commitmentFormHTML = await renderCommitmentForm();
-
+  
   app.innerHTML = `
     <h2 class="event-title">${currentEvent.event_name}</h2>
     ${eventInfoHTML}
@@ -294,16 +289,16 @@ async function renderEventDashboard() {
       </div>
     </div>
   `;
-
-  // creators: hooks
+  
   if (isCreator) {
     document.getElementById('addItemForm')?.addEventListener('submit', handleAddItem);
-    document.getElementById('exportCSV')?.addEventListener('click', exportCSV);
-    document.getElementById('importCSV')?.addEventListener('click', importCSVFile);
-    document.getElementById('editEventBtn')?.addEventListener('click', showEditEventForm);
+    
+    // Set up CSV export/import buttons.
+    document.getElementById('exportCSV').addEventListener('click', exportCSV);
+    document.getElementById('importCSV').addEventListener('click', importCSVFile);
   }
-
-  // copy url
+  
+  // Set up the share URL copy functionality.
   const copyBtn = document.getElementById('copyShareUrl');
   if (copyBtn) {
     copyBtn.addEventListener('click', () => {
@@ -313,7 +308,7 @@ async function renderEventDashboard() {
       console.log('Share URL copied to clipboard.');
     });
   }
-
+  
   attachCommitListeners();
 }
 
@@ -404,7 +399,7 @@ function renderManageItems() {
       ${currentEvent.items.map(item => `
         <div class="item-card">
           <input type="text" value="${item.item_name}" id="edit-item-${item.id}">
-          <input type="number" value="${item.quantity_required}" id="edit-qty-${item.id}">
+          <input type="number" value="${item.quantity_required}" id="edit-qty-${item.id}" min="1">
           <input type="text" value="${item.item_description || ''}" id="edit-desc-${item.id}" placeholder="Item description (optional)">
           <button onclick="updateItem('${item.id}')">Update</button>
           <button onclick="deleteItem('${item.id}')">Delete</button>
@@ -427,11 +422,12 @@ function renderViewItems() {
   return currentEvent.items.map(item => `
     <div class="item-card">
       <p>${item.item_name} - ${item.quantity_required} needed</p>
-      ${item.item_description ? `<p><em>${item.item_description}</em></p>` : ''}
+      ${item.item_description ? `<p><em>${item.item_description}</em></p>` : ""}
     </div>
   `).join('');
 }
 
+// Modified to group commitments into three sections.
 async function renderCommitmentForm() {
   const { data: allCommitments } = await supabase
     .from('commitments')
@@ -447,25 +443,48 @@ async function renderCommitmentForm() {
       }
     });
   }
-  return currentEvent.items.map(item => {
+  
+  const committedItems = [];
+  const uncommittedItems = [];
+  const fullyCommittedItems = [];
+  
+  currentEvent.items.forEach(item => {
     const totalCommitted = commitmentTotals[item.id] || 0;
     const yourCommitment = (userCommitments[item.id] === undefined) ? 0 : userCommitments[item.id];
     const remaining = item.quantity_required - totalCommitted;
-    return `
+    const itemHTML = `
       <div class="commitment-card">
         <strong style="text-align: center; display: block;">${item.item_name}</strong>
-        <br><br>
         <div>Required: ${item.quantity_required}</div>
         <div>Total Committed: ${totalCommitted}</div>
         <div>Your Commitment: ${yourCommitment}</div>
         <div>
-            <input type="number" id="commit-${item.id}" value="${yourCommitment}" min="0">
+            <input type="number" id="commit-${item.id}" value="${yourCommitment}" min="1">
             Remaining: ${remaining}
             <button onclick="commitItem('${item.id}')">Commit</button>
         </div>
       </div>
     `;
-  }).join('');
+    if (yourCommitment > 0) {
+      committedItems.push(itemHTML);
+    } else if (totalCommitted < item.quantity_required) {
+      uncommittedItems.push(itemHTML);
+    } else {
+      fullyCommittedItems.push(itemHTML);
+    }
+  });
+  
+  let html = "";
+  if (committedItems.length > 0) {
+    html += "<h4>Items You've Committed To</h4>" + committedItems.join('');
+  }
+  if (uncommittedItems.length > 0) {
+    html += "<h4>Items Still Open (Under-committed)</h4>" + uncommittedItems.join('');
+  }
+  if (fullyCommittedItems.length > 0) {
+    html += "<h4>Items Fully Committed</h4>" + fullyCommittedItems.join('');
+  }
+  return html;
 }
 
 async function renderCommitmentBreakdown() {
@@ -486,6 +505,7 @@ async function renderCommitmentBreakdown() {
     .select('quantity, item_id, user_id')
     .eq('event_id', currentEvent.id);
   if (error) {
+    console.error("Error loading commitment breakdown:", error.message);
     return `<p>Error loading commitment breakdown.</p>`;
   }
   const breakdownByItem = {};
@@ -493,13 +513,19 @@ async function renderCommitmentBreakdown() {
     if (!row) return;
     const itemId = row.item_id;
     const username = row.user_id ? (userLookup[row.user_id] || "Unknown") : "Unknown";
-    if (!breakdownByItem[itemId]) breakdownByItem[itemId] = [];
-    breakdownByItem[itemId].push(`${username}: ${row.quantity}`);
+    if (!breakdownByItem[itemId]) breakdownByItem[itemId] = { lines: [], total: 0 };
+    breakdownByItem[itemId].lines.push(`${username}: ${row.quantity}`);
+    breakdownByItem[itemId].total += parseInt(row.quantity);
   });
   let html = '<h4>Commitment Breakdown</h4>';
   currentEvent.items.forEach(item => {
     if (breakdownByItem[item.id]) {
-      html += `<p><strong>${item.item_name}:</strong> ${breakdownByItem[item.id].join(', ')}</p>`;
+      let warning = "";
+      if (breakdownByItem[item.id].total > item.quantity_required ||
+         (item.quantity_required == 0 && breakdownByItem[item.id].total > 0)) {
+         warning = ` <span style="color:red;font-weight:bold;">OVERCOMMITTED!</span>`;
+      }
+      html += `<p><strong>${item.item_name}:</strong> ${breakdownByItem[item.id].lines.join(', ')}${warning}</p>`;
     }
   });
   return html;
@@ -513,8 +539,8 @@ async function handleAddItem(e) {
   const newItemName = document.getElementById('newItemName').value.trim();
   const newItemQuantity = parseInt(document.getElementById('newItemQuantity').value);
   const newItemDescription = document.getElementById('newItemDescription').value.trim();
-  if (!newItemName || newItemQuantity <= 0) {
-    alert("Please provide a valid item name and quantity.");
+  if (!newItemName || isNaN(newItemQuantity) || newItemQuantity <= 0) {
+    console.error("Please provide a valid item name and a positive integer for quantity.");
     return;
   }
   const insertData = {
@@ -529,23 +555,22 @@ async function handleAddItem(e) {
     .from('event_items')
     .insert([insertData]);
   if (error) {
-    alert("Error adding item: " + error.message);
+    console.error("Error adding item:", error.message);
   } else {
-    alert("Item added!");
     loadEvent(currentEvent.slug);
   }
 }
 
 async function updateItem(itemId) {
   if (currentUser?.username !== currentEvent.created_by) {
-    alert("Only the event creator can update items.");
+    console.error("Only the event creator can update items.");
     return;
   }
   const newItemName = document.getElementById(`edit-item-${itemId}`).value.trim();
   const newQuantity = parseInt(document.getElementById(`edit-qty-${itemId}`).value);
   const newDescription = document.getElementById(`edit-desc-${itemId}`)?.value.trim();
-  if (!newItemName || newQuantity <= 0) {
-    alert("Please provide valid values.");
+  if (!newItemName || isNaN(newQuantity) || newQuantity <= 0) {
+    console.error("Please provide valid values. Quantities must be positive integers.");
     return;
   }
   const { data: commitmentsData } = await supabase
@@ -554,7 +579,7 @@ async function updateItem(itemId) {
     .eq('item_id', itemId);
   const totalCommitted = commitmentsData?.reduce((sum, c) => sum + c.quantity, 0) || 0;
   if (newQuantity < totalCommitted) {
-    alert(`Cannot reduce required quantity to ${newQuantity}. ${totalCommitted} already committed.`);
+    console.error(`Cannot reduce required quantity to ${newQuantity}. ${totalCommitted} already committed.`);
     return;
   }
   const updateData = { item_name: newItemName, quantity_required: newQuantity };
@@ -566,16 +591,15 @@ async function updateItem(itemId) {
     .update(updateData)
     .eq('id', itemId);
   if (error) {
-    alert(`Error updating item: ${error.message}`);
+    console.error(`Error updating item: ${error.message}`);
   } else {
-    alert("Item updated successfully!");
     loadEvent(currentEvent.slug);
   }
 }
 
 async function deleteItem(itemId) {
   if (currentUser?.username !== currentEvent.created_by) {
-    alert("Only the event creator can delete items.");
+    console.error("Only the event creator can delete items.");
     return;
   }
   if (!confirm("Are you sure you want to delete this item? This cannot be undone.")) {
@@ -586,9 +610,8 @@ async function deleteItem(itemId) {
     .delete()
     .eq('id', itemId);
   if (error) {
-    alert(`Error deleting item: ${error.message}`);
+    console.error(`Error deleting item: ${error.message}`);
   } else {
-    alert("Item deleted successfully!");
     loadEvent(currentEvent.slug);
   }
 }
@@ -596,8 +619,8 @@ async function deleteItem(itemId) {
 async function commitItem(itemId) {
   const inputEl = document.getElementById(`commit-${itemId}`);
   const quantity = parseInt(inputEl.value);
-  if (isNaN(quantity) || quantity < 0) {
-    alert("Please enter a valid number for commitment.");
+  if (isNaN(quantity) || quantity <= 0) { // only allow positive integers
+    console.error("Please enter a positive integer for commitment.");
     return;
   }
   const { data: itemData, error: itemError } = await supabase
@@ -606,7 +629,7 @@ async function commitItem(itemId) {
     .eq('id', itemId)
     .single();
   if (itemError || !itemData) {
-    alert(`Error fetching item details: ${itemError?.message}`);
+    console.error(`Error fetching item details: ${itemError?.message}`);
     return;
   }
   const requiredQuantity = itemData.quantity_required;
@@ -624,7 +647,7 @@ async function commitItem(itemId) {
   const myCurrent = myCommitData ? myCommitData.quantity : 0;
   const available = requiredQuantity - (totalCommitted - myCurrent);
   if (quantity > available) {
-    alert(`Cannot commit ${quantity}. Only ${available} slots are available.`);
+    console.error(`Cannot commit ${quantity}. Only ${available} slots are available.`);
     return;
   }
   const { error } = await supabase
@@ -636,9 +659,8 @@ async function commitItem(itemId) {
       quantity
     }], { onConflict: ['event_id', 'user_id', 'item_id'] });
   if (error) {
-    alert(`Error committing item: ${error.message}`);
+    console.error(`Error committing item: ${error.message}`);
   } else {
-    alert('Commitment successful!');
     loadEvent(currentEvent.slug);
   }
 }
@@ -681,16 +703,295 @@ async function handleUpdateEventDetails(e) {
 }
 
 // ----------------------
+// CSV Export & Import Functionality
+// ----------------------
+
+// Export CSV function (removed the extra comment line)
+async function exportCSV() {
+  // Query creator's commitments for current event
+  const { data: creatorCommitments } = await supabase
+    .from('commitments')
+    .select('item_id, quantity')
+    .eq('event_id', currentEvent.id)
+    .eq('user_id', currentUser.id);
+  const commitmentMap = {};
+  if (creatorCommitments) {
+    creatorCommitments.forEach(commit => {
+      commitmentMap[commit.item_id] = commit.quantity;
+    });
+  }
+  // Build CSV string with header
+  let csvContent = "Item ID,Item Name,Quantity Required,Item Description,Creator Commitment\n";
+  currentEvent.items.forEach(item => {
+    let cc = commitmentMap[item.id] || "";
+    let row = [
+      item.id,
+      `"${item.item_name}"`,
+      item.quantity_required,
+      `"${item.item_description || ""}"`,
+      cc
+    ].join(",");
+    csvContent += row + "\n";
+  });
+  // Trigger download
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+  link.setAttribute("href", url);
+  link.setAttribute("download", `${currentEvent.slug}_export.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+function importCSVFile() {
+  let input = document.getElementById("csvFileInput");
+  if (!input) {
+    input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".csv";
+    input.id = "csvFileInput";
+    input.style.display = "none";
+    document.body.appendChild(input);
+  } else {
+    // Clear any previous value so onchange fires again.
+    input.value = "";
+  }
+  input.click();
+  input.onchange = function(e) {
+    let file = e.target.files[0];
+    if (file) {
+      showImportWarningModal().then(confirmed => {
+        if (confirmed) {
+          readCSVFile(file);
+        }
+      });
+    }
+  };
+}
+
+function showImportWarningModal() {
+  return new Promise((resolve) => {
+    // Create a simple modal overlay
+    const modalOverlay = document.createElement('div');
+    modalOverlay.style.position = 'fixed';
+    modalOverlay.style.top = 0;
+    modalOverlay.style.left = 0;
+    modalOverlay.style.width = '100%';
+    modalOverlay.style.height = '100%';
+    modalOverlay.style.backgroundColor = 'rgba(0,0,0,0.5)';
+    modalOverlay.style.display = 'flex';
+    modalOverlay.style.alignItems = 'center';
+    modalOverlay.style.justifyContent = 'center';
+    modalOverlay.style.zIndex = 1000;
+    
+    const modal = document.createElement('div');
+    modal.style.background = '#fff';
+    modal.style.padding = '20px';
+    modal.style.borderRadius = '8px';
+    modal.style.maxWidth = '400px';
+    modal.style.textAlign = 'center';
+    modal.innerHTML = `
+    <div style="text-align: center;">
+      <p><strong>Warning:</strong></p>
+      <p>This will <strong>overwrite</strong> all item data for this event.</p>
+      <ul style="text-align: left; display: inline-block; margin: 10px auto; padding-left: 20px;">
+        <li>The <strong>Item ID</strong> column must not be modified.</li>
+        <li>If a required quantity in the CSV is <em>higher</em> than total commitments for that item, import will fail.</li>
+      </ul>
+      <p><strong>These actions cannot be undone.</strong></p>
+      <div style="margin-top: 20px;">
+        <label>
+          <input type="checkbox" id="confirmCheckbox">
+          I understand and want to proceed.
+        </label>
+      </div>
+      <div style="margin-top: 20px;">
+        <button id="confirmImport">Confirm Import</button>
+        <button id="cancelImport" style="margin-left: 10px;">Cancel</button>
+      </div>
+    </div>
+  `;
+    modalOverlay.appendChild(modal);
+    document.body.appendChild(modalOverlay);
+    
+    document.getElementById('confirmImport').addEventListener('click', () => {
+      if (document.getElementById('confirmCheckbox').checked) {
+        document.body.removeChild(modalOverlay);
+        resolve(true);
+      } else {
+        alert("Please check the box to confirm.");
+      }
+    });
+    document.getElementById('cancelImport').addEventListener('click', () => {
+      document.body.removeChild(modalOverlay);
+      resolve(false);
+    });
+  });
+}
+
+function readCSVFile(file) {
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const csvText = e.target.result;
+    processCSVData(csvText);
+  };
+  reader.readAsText(file);
+}
+
+async function processCSVData(csvText) {
+  const lines = csvText.trim().split("\n");
+  // Skip header lines (assume first non-comment line is header)
+  let headerIndex = 0;
+  while (headerIndex < lines.length && lines[headerIndex].startsWith("#")) {
+    headerIndex++;
+  }
+  if (headerIndex >= lines.length) {
+    console.error("CSV does not contain header.");
+    return;
+  }
+  // Normalize headers using a headerMap.
+  const rawHeaders = lines[headerIndex].split(",").map(h => h.trim());
+  const headerMap = {
+    "Item ID": "item_id",
+    "Item Name": "item_name",
+    "Quantity Required": "quantity_required",
+    "Item Description": "item_description",
+    "Creator Commitment": "creator_commitment"
+  };
+  const headers = rawHeaders.map(h => headerMap[h] || h);
+  
+  const csvItems = [];
+  for (let i = headerIndex + 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const values = parseCSVLine(line);
+    const rowObj = {};
+    headers.forEach((header, index) => {
+      rowObj[header] = values[index] ? values[index].replace(/^"|"$/g, "") : "";
+    });
+    // Skip the row if all fields are blank
+    const isRowBlank = Object.values(rowObj).every(val => val === "");
+    if (!isRowBlank) {
+      csvItems.push(rowObj);
+    }
+  }
+  try {
+    await processCSVImport(csvItems);
+  } catch (err) {
+    console.error("CSV import error:", err);
+  } finally {
+    loadEvent(currentEvent.slug);
+  }
+}
+
+function parseCSVLine(line) {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+  for (let char of line) {
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      result.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  result.push(current);
+  return result;
+}
+
+async function processCSVImport(csvItems) {
+  // Build a set of item_ids present in CSV.
+  const csvItemIds = new Set();
+  csvItems.forEach(row => {
+    if (row.item_id) csvItemIds.add(row.item_id);
+  });
+  
+  // Map existing items by id.
+  const existingItems = {};
+  currentEvent.items.forEach(item => {
+    existingItems[item.id] = item;
+  });
+  
+  // Process each CSV row.
+  for (let row of csvItems) {
+    if (row.item_id && existingItems[row.item_id]) {
+      // Update existing item.
+      await supabase
+        .from('event_items')
+        .update({
+          item_name: row.item_name,
+          quantity_required: parseInt(row.quantity_required) || 0,
+          item_description: row.item_description || ""
+        })
+        .eq('id', row.item_id);
+      // Update creator's commitment.
+      const creatorCommit = parseInt(row.creator_commitment) || 0;
+      await supabase
+        .from('commitments')
+        .upsert([{
+          event_id: currentEvent.id,
+          user_id: currentUser.id,
+          item_id: row.item_id,
+          quantity: creatorCommit
+        }], { onConflict: ['event_id', 'user_id', 'item_id'] });
+    } else {
+      // Insert new item (ignoring provided item_id if any).
+      const quantityRequired = parseInt(row.quantity_required) || 0;
+      const { data: newItem, error } = await supabase
+        .from('event_items')
+        .insert([{
+          event_id: currentEvent.id,
+          item_name: row.item_name,
+          quantity_required: quantityRequired,
+          item_description: row.item_description || ""
+        }])
+        .select()
+        .single();
+      if (newItem) {
+        const creatorCommit = parseInt(row.creator_commitment) || 0;
+        await supabase
+          .from('commitments')
+          .upsert([{
+            event_id: currentEvent.id,
+            user_id: currentUser.id,
+            item_id: newItem.id,
+            quantity: creatorCommit
+          }], { onConflict: ['event_id', 'user_id', 'item_id'] });
+      }
+    }
+  }
+  
+  // For any existing item not present in CSV, set quantity_required to 0.
+  for (let item of currentEvent.items) {
+    if (!csvItemIds.has(item.id)) {
+      await supabase
+        .from('event_items')
+        .update({ quantity_required: 0 })
+        .eq('id', item.id);
+    }
+  }
+  
+  console.log("CSV import completed.");
+  loadEvent(currentEvent.slug);
+}
+
+// ----------------------
 // 5. Helper: Attach Commit Listeners (stub)
 // ----------------------
 function attachCommitListeners() {
-  // Inline onclicks in renderCommitmentForm handle commits.
+  // Inline onclick handlers in renderCommitmentForm already handle commitments.
 }
 
 // Expose functions so inline onclick attributes can find them.
 window.updateItem = updateItem;
 window.deleteItem = deleteItem;
 window.commitItem = commitItem;
+window.exportCSV = exportCSV;
+window.importCSVFile = importCSVFile;
 
 // ----------------------
 // 6. App Initialization with Hash Routing

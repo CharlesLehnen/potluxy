@@ -4,8 +4,8 @@ $(document).ready(function () {
     // one selector to rule them all
     const focusableSelector = 'input[type="text"], input[type="password"], input[type="date"], input[type="time"], textarea';
 
-    // handle focus on *current or future* matching elements
-    $(document).on('focus', focusableSelector, function () {
+    // Input focus/blur effects
+    formInputs.focus(function () {
         $('#formWrapper').addClass('darken-bg');
         $('#google_translate_element').css({
             'background-color': 'rgb(117, 112, 112)',
@@ -29,4 +29,16 @@ $(document).ready(function () {
         });
         $('h1').css('color', '#2c3e50');
     });
+
+    // Tab switching logic
+$('.tab-button').on('click', function () {
+    const targetTab = $(this).data('tab');
+  
+    $('.tab-button').removeClass('active');
+    $(this).addClass('active');
+  
+    $('.tab-content').removeClass('active');
+    $(`#tab-${targetTab}`).addClass('active');
+  });
+  
 });
