@@ -4,12 +4,20 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const PROJECT_URL = Deno.env.get("PROJECT_URL") ?? "";
+
+// NOTE: We are NOT using PROJECT_URL anymore; link base is hard-coded below.
+// const PROJECT_URL = Deno.env.get("PROJECT_URL") ?? "";
+
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? ""; // e.g. reminders@yourdomain.com
 const COOLDOWN_SEC = Number(Deno.env.get("REMINDER_COOLDOWN_SECONDS") ?? "900"); // 15 min
 
-const sb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
+// Hard-coded site base for email links
+const BASE_URL = "https://www.potluxy.com";
+
+const sb = createClient(SUPABASE_URL, SERVICE_ROLE, {
+  auth: { persistSession: false },
+});
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders() });
@@ -21,7 +29,10 @@ serve(async (req) => {
 
     // 1) Load event
     const { data: event, error: eventErr } = await sb
-      .from("events").select("*").eq("id", event_id).single();
+      .from("events")
+      .select("*")
+      .eq("id", event_id)
+      .single();
     if (eventErr || !event) return json({ error: "Event not found" }, 404);
 
     // respect your schema
@@ -34,7 +45,12 @@ serve(async (req) => {
     const now = Date.now();
     const remain = Math.ceil((COOLDOWN_SEC * 1000 - (now - last)) / 1000);
     if (last && remain > 0) {
-      return json({ ok: false, sent: 0, cooldown_remaining_seconds: remain, note: "cooldown active" });
+      return json({
+        ok: false,
+        sent: 0,
+        cooldown_remaining_seconds: remain,
+        note: "cooldown active",
+      });
     }
 
     // 3) attendees — try with wants_reminders, fall back if column missing
@@ -54,11 +70,15 @@ serve(async (req) => {
 
     // 4) commitments + items
     const { data: commitments, error: commitsErr } = await sb
-      .from("commitments").select("user_id, item_id, quantity").eq("event_id", event_id);
+      .from("commitments")
+      .select("user_id, item_id, quantity")
+      .eq("event_id", event_id);
     if (commitsErr) return json({ error: commitsErr.message }, 500);
 
     const { data: items, error: itemsErr } = await sb
-      .from("event_items").select("id, item_name").eq("event_id", event_id);
+      .from("event_items")
+      .select("id, item_name")
+      .eq("event_id", event_id);
     if (itemsErr) return json({ error: itemsErr.message }, 500);
 
     if (!RESEND_API_KEY || !RESEND_FROM) {
@@ -84,11 +104,11 @@ serve(async (req) => {
 
       const userCommits = commitsByUser[att.id] ?? [];
       const commitLines = userCommits.length
-        ? userCommits.map(c => `<li>${itemNameById[c.item_id] ?? "Unknown item"} – ${c.quantity}</li>`).join("")
+        ? userCommits.map((c) => `<li>${itemNameById[c.item_id] ?? "Unknown item"} – ${c.quantity}</li>`).join("")
         : "<li>(You have not committed to anything yet)</li>";
 
       const subject = `Reminder for ${event.event_name}`;
-      const eventUrl = event.slug ? `${PROJECT_URL}/#/event/${event.slug}` : "#";
+      const eventUrl = `${BASE_URL.replace(/\/+$/, "")}/#/event/${event.slug}`;
 
       const html = `
         <div style="font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
@@ -116,15 +136,21 @@ serve(async (req) => {
           },
           body: JSON.stringify({ from: RESEND_FROM, to: att.real_email, subject, html }),
         });
-        if (!r.ok) errors.push({ to: att.real_email, error: await r.text() });
-        else sent++;
+        if (!r.ok) {
+          errors.push({ to: att.real_email, error: await r.text() });
+        } else {
+          sent++;
+        }
       } catch (err) {
         errors.push({ to: att.real_email, error: String(err) });
       }
     }
 
     // 6) record cooldown start
-    await sb.from("events").update({ last_reminder_sent_at: new Date().toISOString() }).eq("id", event_id);
+    await sb
+      .from("events")
+      .update({ last_reminder_sent_at: new Date().toISOString() })
+      .eq("id", event_id);
 
     return json({ ok: true, sent, errors });
   } catch (err) {
@@ -138,6 +164,10 @@ function corsHeaders() {
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   };
 }
+
 function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...corsHeaders() } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", ...corsHeaders() },
+  });
 }
