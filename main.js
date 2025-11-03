@@ -1002,7 +1002,10 @@ function promptForEmailIfRequired() {
   });
 }
 
+
 // NEW: call Supabase Edge Function to send the emails (dashboard invoke)
+// Send reminder emails (creator only) — collects OPTIONAL host message,
+// always adds the server-side disclaimer, and shows clearer errors.
 async function sendReminderEmails() {
   if (currentUser?.username !== currentEvent.created_by) {
     alert('Only the event creator can send reminders.');
@@ -1012,7 +1015,7 @@ async function sendReminderEmails() {
   const btn = document.getElementById('sendRemindersBtn');
   if (!btn) return;
 
-  // local 30s button lock as a UI guard (server has the real cooldown)
+  // simple client-side guard; server enforces the real window
   const now = Date.now();
   const until = Number(btn.dataset.cooldownUntil || 0);
   if (until && now < until) {
@@ -1021,37 +1024,80 @@ async function sendReminderEmails() {
     return;
   }
 
-  btn.disabled = true;
-  try {
-    const { data, error } = await supabase.functions.invoke('send-reminders', {
-      body: { event_id: currentEvent.id }
-    });
+  // --- modal to collect an optional note from the host ---
+  const overlay = document.createElement('div');
+  overlay.style =
+    'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:3000;';
+  const box = document.createElement('div');
+  box.style =
+    'background:#fff;padding:20px;border-radius:10px;max-width:520px;width:92%;';
+  box.innerHTML = `
+    <h3 style="margin:0 0 8px">Send reminder emails</h3>
+    <p style="margin:0 0 8px;color:#555">
+      Optional message to include near the top of the email:
+    </p>
+    <textarea id="hostMsg" rows="5" style="width:100%;resize:vertical;" placeholder="(Optional) Add a note for attendees..."></textarea>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
+      <button id="cancelSend" type="button">Cancel</button>
+      <button id="confirmSend" type="button">Send</button>
+    </div>
+  `;
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
 
-    if (error) {
-      const serverMsg = typeof data?.error === 'string' ? `\nDetails: ${data.error}` : '';
-      alert(`Error sending reminders: ${error.message}${serverMsg}`);
-      return;
+  document.getElementById('cancelSend').onclick = () => overlay.remove();
+
+  document.getElementById('confirmSend').onclick = async () => {
+    // sanitize + cap length so payloads are small and safe
+    const hostMsg = (document.getElementById('hostMsg').value || '')
+      .trim()
+      .replace(/\r?\n/g, '\n')
+      .slice(0, 1000);
+
+    overlay.remove();
+    btn.disabled = true;
+
+    try {
+      const { data, error } = await supabase.functions.invoke('send-reminders', {
+        body: { event_id: currentEvent.id, host_message: hostMsg }
+      });
+
+      if (error) {
+        console.error('[send-reminders] invoke error:', error);
+        const explanation =
+          error.name === 'FunctionsFetchError'
+            ? '\n(Network/CORS/blocked request — the function was not reached.)'
+            : error.name === 'FunctionsHttpError'
+            ? '\n(Edge Function responded with a non-2xx status.)'
+            : '';
+        const serverMsg =
+          typeof data?.error === 'string' ? `\nDetails: ${data.error}` : '';
+        alert(`Error sending reminders: ${error.message}${explanation}${serverMsg}`);
+        return;
+      }
+
+      if (data?.cooldown_remaining_seconds) {
+        const s = data.cooldown_remaining_seconds;
+        alert(`Too soon. Try again in ${Math.floor(s / 60)}m ${s % 60}s.`);
+        btn.dataset.cooldownUntil = String(Date.now() + 15_000);
+        return;
+      }
+
+      if (Array.isArray(data?.errors) && data.errors.length) {
+        console.warn('Per-recipient send errors:', data.errors);
+      }
+
+      alert(`Reminder emails attempted. Sent: ${data?.sent ?? 0}`);
+    } catch (e) {
+      console.error('[send-reminders] unexpected exception:', e);
+      alert('Error sending reminders: an unexpected error occurred (see console).');
+    } finally {
+      btn.dataset.cooldownUntil = String(Date.now() + 30_000);
+      btn.disabled = false;
     }
-
-    if (data?.cooldown_remaining_seconds) {
-      const s = data.cooldown_remaining_seconds;
-      alert(`Too soon. Try again in ${Math.floor(s/60)}m ${s%60}s.`);
-      // small local lock to avoid instant retry storm
-      btn.dataset.cooldownUntil = String(Date.now() + 15_000);
-      return;
-    }
-
-    if (Array.isArray(data?.errors) && data.errors.length) {
-      console.warn('Per-recipient send errors:', data.errors);
-    }
-
-    alert(`Reminder emails attempted. Sent: ${data?.sent ?? 0}`);
-  } finally {
-    // 30s local lock
-    btn.dataset.cooldownUntil = String(Date.now() + 30_000);
-    btn.disabled = false;
-  }
+  };
 }
+
 
 
 
