@@ -1004,17 +1004,56 @@ function promptForEmailIfRequired() {
 
 // NEW: call Supabase Edge Function to send the emails (dashboard invoke)
 async function sendReminderEmails() {
-  if (currentUser?.username !== currentEvent.created_by) { alert('Only the event creator can send reminders.'); return; }
-  const { data: { session }, error: sessErr } = await supabase.auth.getSession();
-  if (sessErr) { alert('Could not get session: ' + sessErr.message); return; }
-  if (!session) { alert('You must be signed in to this event to send emails.'); return; }
+  if (currentUser?.username !== currentEvent.created_by) {
+    alert('Only the event creator can send reminders.');
+    return;
+  }
 
-  const { data, error } = await supabase.functions.invoke('send-reminders', { body: { event_id: currentEvent.id } });
-  if (error) { console.error('Error sending reminders:', error); alert('Error sending reminders: ' + error.message); return; }
+  const btn = document.getElementById('sendRemindersBtn');
+  if (!btn) return;
 
-  console.log('Reminder result:', data);
-  alert(`Reminder emails attempted. Sent: ${data?.sent ?? 0}`);
+  // local 30s button lock as a UI guard (server has the real cooldown)
+  const now = Date.now();
+  const until = Number(btn.dataset.cooldownUntil || 0);
+  if (until && now < until) {
+    const secs = Math.ceil((until - now) / 1000);
+    alert(`Please wait ${secs}s before trying again.`);
+    return;
+  }
+
+  btn.disabled = true;
+  try {
+    const { data, error } = await supabase.functions.invoke('send-reminders', {
+      body: { event_id: currentEvent.id }
+    });
+
+    if (error) {
+      const serverMsg = typeof data?.error === 'string' ? `\nDetails: ${data.error}` : '';
+      alert(`Error sending reminders: ${error.message}${serverMsg}`);
+      return;
+    }
+
+    if (data?.cooldown_remaining_seconds) {
+      const s = data.cooldown_remaining_seconds;
+      alert(`Too soon. Try again in ${Math.floor(s/60)}m ${s%60}s.`);
+      // small local lock to avoid instant retry storm
+      btn.dataset.cooldownUntil = String(Date.now() + 15_000);
+      return;
+    }
+
+    if (Array.isArray(data?.errors) && data.errors.length) {
+      console.warn('Per-recipient send errors:', data.errors);
+    }
+
+    alert(`Reminder emails attempted. Sent: ${data?.sent ?? 0}`);
+  } finally {
+    // 30s local lock
+    btn.dataset.cooldownUntil = String(Date.now() + 30_000);
+    btn.disabled = false;
+  }
 }
+
+
 
 // Expose functions so inline onclick attributes can find them.
 window.updateItem = updateItem;
