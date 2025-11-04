@@ -187,10 +187,12 @@ async function renderCreateEventForm() {
 
       <label for="eventName">Event Name:</label>
       <input type="text" id="eventName" required>
+      <small style="display:block;color:#666;margin-top:.25rem;">No emojis</small>
       <br><br>
 
       <label for="eventDescription">Event Description (optional):</label>
       <textarea id="eventDescription" placeholder="Enter a description..."></textarea>
+      <small style="display:block;color:#666;margin-top:.25rem;">No emojis</small>
       <br><br>
 
       <label for="eventDate">Event Date (optional):</label>
@@ -202,7 +204,7 @@ async function renderCreateEventForm() {
       <br><br>
 
       <label for="eventLocation">Event Location (optional):</label>
-      <input type="text" id="eventLocation" placeholder="Start typing an address...">
+      <input type="text" id="eventLocation" placeholder="Search by typing an address...">
       <input type="hidden" id="eventLocationPlaceId">
       <input type="hidden" id="eventLocationLat">
       <input type="hidden" id="eventLocationLng">
@@ -215,9 +217,9 @@ async function renderCreateEventForm() {
       <p style="font-size:.8rem;color:#666;margin-top:.3rem;">If checked, people joining this event will be required to provide an email.</p>
       <br>
 
-      <label for="username">Your Event Username:</label>
+      <label for="username">Your Name:</label>
       <input type="text" id="username" required placeholder="e.g., Jane Doe">
-      <small style="display:block;color:#666;margin-top:.25rem;">Spaces are allowed. We’ll store them as underscores.</small>
+      <small style="display:block;color:#666;margin-top:.25rem;"></small>
       <br><br>
 
       <label for="password">Password (optional for editing):</label>
@@ -482,6 +484,7 @@ async function handleRsvpYes(e, slug) {
   const aliasEmail = constructEmail(cleanUsername, slug);
   const pwd = password || 'no-password';
 
+  // 1) Sign in (or soft sign-up) with constructed alias email
   let { error: signInErr } = await supabase.auth.signInWithPassword({ email: aliasEmail, password: pwd });
   if (signInErr) {
     const { error: signUpErr } = await supabase.auth.signUp({ email: aliasEmail, password: pwd });
@@ -494,35 +497,19 @@ async function handleRsvpYes(e, slug) {
 
   const { data: sessionData } = await supabase.auth.getSession();
   if (!sessionData?.session) { setText('yesErr', 'Could not establish a session.'); show(errBox); return; }
-  const userId = sessionData.session.user.id;
 
-  // ensure event_users row
-  let { data: profile } = await supabase.from('event_users')
-    .select('*').eq('id', userId).eq('event_id', currentEvent.id).maybeSingle();
+  // 2) Claim/flip the username to RSVP 'yes' (handles existing "no" rows)
+  const { data: claimed, error: claimErr } = await supabase.rpc('rsvp_yes_claim', {
+    p_event_id: currentEvent.id,
+    p_username: cleanUsername,
+    p_real_email: requiresEmail ? realEmail : null
+  });
 
-  if (!profile) {
-    const ins = { id: userId, event_id: currentEvent.id, username: cleanUsername, ...(requiresEmail ? { real_email: realEmail } : {}) };
-    const { data: newProf, error: profErr } = await supabase.from('event_users').insert([ins]).select().single();
-    if (profErr) { setText('yesErr', `Error creating attendee: ${profErr.message}`); show(errBox); return; }
-    profile = newProf;
-  } else if (requiresEmail && !profile.real_email && realEmail) {
-    await supabase.from('event_users').update({ real_email: realEmail }).eq('id', profile.id);
-  }
+  if (claimErr) { setText('yesErr', `Could not set RSVP: ${claimErr.message}`); show(errBox); return; }
+  if (!claimed) { setText('yesErr', 'Unexpected: claim returned no row.'); show(errBox); return; }
 
-  // merge any anonymous "no" row → this user (optional Edge Function)
-  try {
-    await supabase.functions.invoke('merge-anon-no-to-user', {
-      body: { event_id: currentEvent.id, username: cleanUsername }
-    });
-  } catch { /* optional */ }
-
-  // mark RSVP yes + enable reminders + clear decline fields
-  await supabase.from('event_users')
-    .update({ rsvp_status: 'yes', wants_reminders: true, decline_message: null, decline_at: null })
-    .eq('id', userId).eq('event_id', currentEvent.id);
-
-  // keep local state in sync for commit gating
-  currentUser = { ...profile, rsvp_status: 'yes', real_email: profile.real_email || realEmail || null };
+  // 3) Local state → yes; go to dashboard
+  currentUser = claimed;
   renderEventDashboard();
 }
 
@@ -785,9 +772,11 @@ async function renderEventDashboard() {
 }
 
 // ---------- Creator Summary ----------
+// ---------- Creator Summary ----------
 async function renderCreatorSummaryBox() {
   const counts = await getRsvpCounts();
   const breakdownTable = await renderCommitmentBreakdownTable();
+  const yesListHTML = await renderYesList();      // ⬅️ add this
   const declinesHTML = await renderDeclinesList();
 
   return `
@@ -802,6 +791,12 @@ async function renderCreatorSummaryBox() {
             ${breakdownTable}
           </div>` : ''}
 
+        ${yesListHTML ? `
+          <div style="margin:1rem 0;">
+            <div style="font-weight:600;margin-bottom:.25rem;">RSVP “Yes”</div>
+            ${yesListHTML}
+          </div>` : ''}
+
         ${declinesHTML ? `
           <div style="margin:1rem 0;">
             <div style="font-weight:600;margin-bottom:.25rem;">RSVP “No”</div>
@@ -811,6 +806,31 @@ async function renderCreatorSummaryBox() {
     </details>
   `;
 }
+
+
+async function renderYesList() {
+  const { data: rows, error } = await supabase
+    .from('event_users')
+    .select('username, real_email, created_at')
+    .eq('event_id', currentEvent.id)
+    .eq('rsvp_status', 'yes')
+    .order('username', { ascending: true });
+
+  if (error || !rows || rows.length === 0) return '';
+
+  const esc = (s='') => s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  return `
+    <ul style="list-style:none;padding:0;margin:0;">
+      ${rows.map(d => `
+        <li style="margin:.35rem 0; padding:.4rem .6rem; background:#f8fafc; border:1px solid #eef2f7; border-radius:8px;">
+          <strong>${esc(d.username)}</strong>
+          ${d.real_email ? ` <span style="color:#64748b;">— ${esc(d.real_email)}</span>` : ''}
+        </li>
+      `).join('')}
+    </ul>
+  `;
+}
+
 
 // "RSVP No" list (filters out stale fallback rows when username is not currently "no")
 async function renderDeclinesList() {
