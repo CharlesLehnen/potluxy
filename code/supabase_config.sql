@@ -1,5 +1,6 @@
 -- ============================================
 -- Potluxy schema (fresh install + migration-safe tail)
+-- YES/NO only; creator always 'yes'; no new tables
 -- ============================================
 
 -- 0) Extension
@@ -27,7 +28,11 @@ CREATE TABLE IF NOT EXISTS public.events (
   -- email-reminder controls
   collect_real_emails BOOLEAN NOT NULL DEFAULT false,
   last_reminder_sent_at TIMESTAMPTZ,
-  reminder_window_count INTEGER NOT NULL DEFAULT 0
+  reminder_window_count INTEGER NOT NULL DEFAULT 0,
+
+  -- deletion flags used by UI
+  delete_requested_at TIMESTAMPTZ,
+  marked_for_deletion BOOLEAN NOT NULL DEFAULT false
 );
 
 -- --------------------------------------------
@@ -47,7 +52,7 @@ CREATE TABLE IF NOT EXISTS public.event_items (
 -- 3) EVENT_USERS (per-event identity)
 -- --------------------------------------------
 CREATE TABLE IF NOT EXISTS public.event_users (
-  id UUID PRIMARY KEY, -- normally auth.uid() (except public 'no' flow)
+  id UUID PRIMARY KEY, -- normally auth.uid() (username-only RSVP No may mint a random UUID client-side)
   event_id UUID NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
   username TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -59,7 +64,7 @@ CREATE TABLE IF NOT EXISTS public.event_users (
   wants_reminders BOOLEAN NOT NULL DEFAULT true,
 
   -- RSVP (+ decline fields)
-  rsvp_status TEXT NOT NULL DEFAULT 'yes' CHECK (rsvp_status IN ('yes','no','maybe')),
+  rsvp_status TEXT NOT NULL DEFAULT 'yes' CHECK (rsvp_status IN ('yes','no')),
   decline_message TEXT,
   decline_at TIMESTAMPTZ,
 
@@ -80,7 +85,7 @@ CREATE INDEX IF NOT EXISTS event_users_event_id_status_idx
   ON public.event_users (event_id, rsvp_status)
   WHERE rsvp_status IS NOT NULL;
 
--- ✅ Your requested indexes
+-- ✅ Convenience indices
 CREATE INDEX IF NOT EXISTS event_users_event_id_idx
   ON public.event_users(event_id);
 
@@ -128,6 +133,13 @@ CREATE POLICY IF NOT EXISTS "Event update"
         AND event_users.event_id = events.id
         AND event_users.username = events.created_by
     )
+  ) WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.event_users
+      WHERE event_users.id = auth.uid()
+        AND event_users.event_id = events.id
+        AND event_users.username = events.created_by
+    )
   );
 
 CREATE POLICY IF NOT EXISTS "Event delete"
@@ -168,6 +180,15 @@ CREATE POLICY IF NOT EXISTS "Event items update"
           SELECT created_by FROM public.events WHERE events.id = event_items.event_id
         )
     )
+  ) WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.event_users
+      WHERE event_users.id = auth.uid()
+        AND event_users.event_id = event_items.event_id
+        AND event_users.username = (
+          SELECT created_by FROM public.events WHERE events.id = event_items.event_id
+        )
+    )
   );
 
 CREATE POLICY IF NOT EXISTS "Event items delete"
@@ -183,6 +204,7 @@ CREATE POLICY IF NOT EXISTS "Event items delete"
   );
 
 -- EVENT_USERS:
+-- Keep public SELECT so email->username lookup works pre-auth
 CREATE POLICY IF NOT EXISTS "Event users select"
   ON public.event_users FOR SELECT USING (true);
 
@@ -197,7 +219,7 @@ CREATE POLICY IF NOT EXISTS "Event users update self"
   USING (id = auth.uid())
   WITH CHECK (id = auth.uid());
 
--- MVP public decline (anonymous "RSVP No" without auth)
+-- MVP public decline (username-only "RSVP No" without auth)
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -237,31 +259,7 @@ CREATE POLICY IF NOT EXISTS "Commitments delete"
 -- Additional rules / protections
 -- --------------------------------------------
 
--- Overcommit guard on INSERT
-CREATE POLICY IF NOT EXISTS "Prevent overcommitments on insert"
-  ON public.commitments FOR INSERT
-  WITH CHECK (
-    quantity <= (
-      SELECT quantity_required
-           - COALESCE((SELECT SUM(quantity) FROM public.commitments WHERE item_id = commitments.item_id), 0)
-      FROM public.event_items
-      WHERE id = commitments.item_id
-    )
-  );
-
--- Overcommit guard on UPDATE
-CREATE POLICY IF NOT EXISTS "Prevent overcommitments on update"
-  ON public.commitments FOR UPDATE
-  WITH CHECK (
-    quantity <= (
-      SELECT quantity_required
-           - COALESCE((SELECT SUM(quantity) FROM public.commitments WHERE item_id = commitments.item_id), 0)
-      FROM public.event_items
-      WHERE id = commitments.item_id
-    )
-  );
-
--- Prevent reducing item.required below current commitments
+-- Prevent reducing item.required below current commitments (already had)
 CREATE OR REPLACE FUNCTION public.prevent_reduce_below_commitment()
 RETURNS TRIGGER AS $$
 DECLARE total_committed INT;
@@ -275,12 +273,48 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS prevent_reduce_below_commitment_trigger ON public.event_items;
 CREATE TRIGGER prevent_reduce_below_commitment_trigger
 BEFORE UPDATE ON public.event_items
 FOR EACH ROW
 EXECUTE FUNCTION public.prevent_reduce_below_commitment();
 
--- Disallow moving an event_user to another event or renaming their identity
+-- Server-side cap: total committed for an item may not exceed required (insert/update)
+CREATE OR REPLACE FUNCTION public.enforce_commitment_cap()
+RETURNS TRIGGER AS $$
+DECLARE req INT;
+DECLARE current_sum INT;
+DECLARE prior INT := 0;
+BEGIN
+  SELECT quantity_required INTO req FROM public.event_items WHERE id = NEW.item_id;
+  IF req IS NULL THEN
+    RAISE EXCEPTION 'Unknown item_id %', NEW.item_id;
+  END IF;
+
+  SELECT COALESCE(SUM(quantity),0) INTO current_sum
+  FROM public.commitments
+  WHERE item_id = NEW.item_id;
+
+  IF TG_OP = 'UPDATE' THEN
+    SELECT COALESCE(quantity,0) INTO prior FROM public.commitments WHERE id = OLD.id;
+  END IF;
+
+  IF (current_sum - prior + NEW.quantity) > req THEN
+    RAISE EXCEPTION 'Cannot commit %, only % slot(s) available.',
+      NEW.quantity, GREATEST(req - (current_sum - prior), 0);
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS enforce_commitment_cap ON public.commitments;
+CREATE TRIGGER enforce_commitment_cap
+BEFORE INSERT OR UPDATE ON public.commitments
+FOR EACH ROW
+EXECUTE FUNCTION public.enforce_commitment_cap();
+
+-- Disallow moving an event_user to another event or renaming their identity (yours)
 CREATE OR REPLACE FUNCTION public.lock_event_users_keys()
 RETURNS trigger AS $f$
 DECLARE original_row public.event_users;
@@ -298,14 +332,52 @@ BEGIN
 END;
 $f$ LANGUAGE plpgsql SECURITY DEFINER;
 
+DROP TRIGGER IF EXISTS lock_event_users_keys ON public.event_users;
 CREATE TRIGGER lock_event_users_keys
 BEFORE UPDATE ON public.event_users
 FOR EACH ROW
 EXECUTE FUNCTION public.lock_event_users_keys();
 
+-- Force creators to remain RSVP 'yes' (cannot flip to 'no')
+CREATE OR REPLACE FUNCTION public.enforce_creator_yes()
+RETURNS trigger AS $$
+DECLARE is_creator BOOLEAN;
+BEGIN
+  SELECT (e.created_by = NEW.username) INTO is_creator
+  FROM public.events e
+  WHERE e.id = NEW.event_id;
+
+  IF is_creator THEN
+    NEW.rsvp_status := 'yes';
+    NEW.wants_reminders := COALESCE(NEW.wants_reminders, TRUE);
+    NEW.decline_message := NULL;
+    NEW.decline_at := NULL;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS enforce_creator_yes_ins ON public.event_users;
+DROP TRIGGER IF EXISTS enforce_creator_yes_upd ON public.event_users;
+CREATE TRIGGER enforce_creator_yes_ins
+BEFORE INSERT ON public.event_users
+FOR EACH ROW
+EXECUTE FUNCTION public.enforce_creator_yes();
+
+CREATE TRIGGER enforce_creator_yes_upd
+BEFORE UPDATE ON public.event_users
+FOR EACH ROW
+EXECUTE FUNCTION public.enforce_creator_yes();
+
 -- ============================================
 -- Migration-safe addendum (safe to re-run)
 -- ============================================
+
+-- Ensure events deletion flags exist (for older DBs)
+ALTER TABLE public.events
+  ADD COLUMN IF NOT EXISTS delete_requested_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS marked_for_deletion BOOLEAN NOT NULL DEFAULT false;
 
 -- Ensure decline columns & RSVP column exist
 ALTER TABLE public.event_users
@@ -313,7 +385,7 @@ ALTER TABLE public.event_users
   ADD COLUMN IF NOT EXISTS decline_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS rsvp_status TEXT;
 
--- Normalize the RSVP check to allow 'maybe' (keeps your UI flexible)
+-- Normalize the RSVP check to YES/NO only (no maybe anywhere)
 DO $$
 DECLARE conname text;
 BEGIN
@@ -330,48 +402,14 @@ BEGIN
 
   ALTER TABLE public.event_users
     ADD CONSTRAINT event_users_rsvp_status_chk
-    CHECK (rsvp_status IN ('yes','no','maybe'));
+    CHECK (rsvp_status IN ('yes','no'));
 END$$;
 
 -- Default + backfill
 ALTER TABLE public.event_users
   ALTER COLUMN rsvp_status SET DEFAULT 'yes';
 
+-- If any legacy values exist, coerce them safely (you said there aren't, but this is safe)
 UPDATE public.event_users
-SET rsvp_status = 'yes'
-WHERE rsvp_status IS NULL;
-
--- Indices (all idempotent)
-CREATE INDEX IF NOT EXISTS event_users_event_id_status_idx
-  ON public.event_users (event_id, rsvp_status) WHERE rsvp_status IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS event_users_event_id_lower_username_uniq
-  ON public.event_users (event_id, lower(username));
-
--- ✅ Your requested indices again here (safe if already created above)
-CREATE INDEX IF NOT EXISTS event_users_event_id_idx
-  ON public.event_users(event_id);
-
-CREATE INDEX IF NOT EXISTS event_users_event_id_rsvp_idx
-  ON public.event_users(event_id, rsvp_status);
-
--- RLS public decline policies (ensure present)
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies
-    WHERE schemaname='public' AND tablename='event_users' AND policyname='eu_insert_no'
-  ) THEN
-    CREATE POLICY eu_insert_no ON public.event_users
-      FOR INSERT WITH CHECK (rsvp_status = 'no' AND wants_reminders IS NOT TRUE);
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies
-    WHERE schemaname='public' AND tablename='event_users' AND policyname='eu_upsert_no'
-  ) THEN
-    CREATE POLICY eu_upsert_no ON public.event_users
-      FOR UPDATE USING (true)
-      WITH CHECK (rsvp_status = 'no' AND wants_reminders IS NOT TRUE);
-  END IF;
-END$$;
+SET rsvp_status = 'no'
+WHERE rsvp_status IS NOT NULL AND rsvp_status NOT IN ('yes','no');

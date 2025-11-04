@@ -8,7 +8,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let currentEvent = null;
 let currentUser = null; // Managed via supabase.auth
 
-// --- NEW: tiny styles (spacing/dividers + colored table rows) ---
+// --- tiny styles (spacing/dividers + colored table rows) ---
 (() => {
   const s = document.createElement('style');
   s.textContent = `
@@ -18,14 +18,14 @@ let currentUser = null; // Managed via supabase.auth
     .sec-divider{height:1px;background:#e6e8eb;margin:22px 0}
     .pill{display:inline-block;padding:3px 10px;border-radius:999px;border:1px solid #e5e7eb}
     .cb-head{background:#f4f7fb}
-    .cb-row-full{background:#eef7ee}     /* muted green */
-    .cb-row-partial{background:#fff8db}  /* muted yellow */
-    .cb-row-open{background:#fdecec}     /* muted red   */
+    .cb-row-full{background:#eef7ee}
+    .cb-row-partial{background:#fff8db}
+    .cb-row-open{background:#fdecec}
   `;
   document.head.appendChild(s);
 })();
 
-// ✨ Helpers: UI messaging + username sanitation/validation
+// Helpers
 function setText(id, msg) {
   const el = document.getElementById(id);
   if (el) el.textContent = msg || '';
@@ -43,17 +43,14 @@ function validateUsername(raw) {
   if (!raw || raw.trim().length < 2) return 'Please enter a name or username (2+ characters).';
   return null;
 }
-
-// Utility: Construct event-specific email from (sanitized) username and event slug.
 function constructEmail(username, slug) {
   return `${username}.${slug}@mailinator.com`;
 }
 
-// Helper: counts for going/no (no "maybe") with rsvps fallback when available
+// RSVP counts (fallback to rsvps table if present for "no")
 async function getRsvpCounts() {
   const c = { yes: 0, no: 0 };
 
-  // event_users status
   const { data: eu, error: euErr } = await supabase
     .from('event_users')
     .select('rsvp_status')
@@ -66,19 +63,31 @@ async function getRsvpCounts() {
     });
   }
 
-  // optional fallback: rsvps (if table exists and policy allows)
   try {
     const { data: rs } = await supabase
       .from('rsvps')
       .select('status')
       .eq('event_id', currentEvent.id);
-    if (Array.isArray(rs)) {
-      c.no += rs.filter(r => r.status === 'no').length;
-    }
-  } catch { /* table may not exist; ignore */ }
+    if (Array.isArray(rs)) c.no += rs.filter(r => r.status === 'no').length;
+  } catch { /* optional */ }
 
   return c;
 }
+
+
+// If there is a pre-existing anonymous RSVP "no" row for this username,
+// reassign it to the logged-in user's id so we can flip to "yes" cleanly.
+// Works under your eu_upsert_no policy (no secrets needed).
+async function mergeAnonNoToUserId(userId, username) {
+  await supabase
+    .from('event_users')
+    .update({ id: userId }) // re-key to the authenticated user
+    .eq('event_id', currentEvent.id)
+    .eq('username', username)
+    .eq('rsvp_status', 'no')
+    .eq('wants_reminders', false);
+}
+
 
 // -----------------------------------------------------------------------------
 // OpenStreetMap / Nominatim helpers (no API key needed)
@@ -89,18 +98,16 @@ async function osmSearch(query) {
     q: query,
     format: 'json',
     addressdetails: 1,
-    limit: 5,
+    limit: 5
   });
   const res = await fetch(
     `https://nominatim.openstreetmap.org/search?${params.toString()}`,
-    { headers: { 'Accept-Language': 'en' } },
+    { headers: { 'Accept-Language': 'en' } }
   );
   if (!res.ok) return [];
   return await res.json();
 }
 
-// Lightweight autocomplete dropdown under an input.
-// onSelect(place) gets called with OSM place object.
 function attachOSMAutocomplete(inputEl, onSelect) {
   if (!inputEl) return;
 
@@ -150,7 +157,6 @@ function attachOSMAutocomplete(inputEl, onSelect) {
   });
 }
 
-// Build a Google Maps link for web/mobile from event's location
 function buildGoogleMapsUrl(evt) {
   const hasCoords = evt.event_lat && evt.event_lng;
   if (hasCoords) return `https://www.google.com/maps/search/?api=1&query=${evt.event_lat},${evt.event_lng}`;
@@ -160,7 +166,6 @@ function buildGoogleMapsUrl(evt) {
   return null;
 }
 
-// time formatter
 function formatEventTime(t) {
   if (!t) return '';
   const [h, m] = t.split(':').map(Number);
@@ -203,7 +208,6 @@ async function renderCreateEventForm() {
       <input type="hidden" id="eventLocationLng">
       <br><br>
 
-      <!-- host chooses if this event collects real emails -->
       <label style="display:flex;gap:.5rem;align-items:center;">
         <input type="checkbox" id="collectEmails">
         Collect attendee emails for reminders (optional)
@@ -238,7 +242,6 @@ function generateSlug(eventName) {
   return eventName.toLowerCase().trim().replace(/\s+/g, '-') + '-' + uniqueId;
 }
 
-// ✨ Robust create flow with inline errors + auto sign-in
 async function createEvent(e) {
   e.preventDefault();
   const errBox = document.getElementById('eventFormError');
@@ -269,14 +272,12 @@ async function createEvent(e) {
     const email = constructEmail(cleanUsername, slug);
     const pwd = password || 'no-password';
 
-    // sign up (ignore "already registered" and proceed to sign-in)
     const { error: signUpError } = await supabase.auth.signUp({ email, password: pwd });
     if (signUpError && !/already|registered/i.test(signUpError.message)) {
       setText('eventFormError', `Sign up failed: ${signUpError.message}`);
       show(errBox); btn.disabled = false; return;
     }
 
-    // always try to sign-in (covers the "already registered" case)
     const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password: pwd });
     if (signInErr) {
       setText('eventFormError', `Sign in failed: ${signInErr.message}. If your Supabase project requires email confirmations, disable them for this flow or use a server-side admin create.`);
@@ -295,7 +296,7 @@ async function createEvent(e) {
       .insert([{
         event_name: eventName,
         slug,
-        created_by: cleanUsername,            // stored
+        created_by: cleanUsername,
         event_description: eventDescription || null,
         event_date: eventDate || null,
         event_time: eventTime || null,
@@ -303,7 +304,7 @@ async function createEvent(e) {
         event_place_id: eventLocationPlaceId || null,
         event_lat: eventLocationLat ? Number(eventLocationLat) : null,
         event_lng: eventLocationLng ? Number(eventLocationLng) : null,
-        collect_real_emails: collectEmails,
+        collect_real_emails: collectEmails
       }])
       .select().single();
 
@@ -353,7 +354,7 @@ async function loadEvent(slug) {
 
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) {
-    renderLoginForm(slug); // shows triage panel
+    renderLoginForm(slug);
   } else {
     const { data: profileData } = await supabase
       .from('event_users')
@@ -362,7 +363,7 @@ async function loadEvent(slug) {
       .eq('event_id', currentEvent.id)
       .maybeSingle();
     if (!profileData) {
-      renderLoginForm(slug); // triage panel again
+      renderLoginForm(slug);
     } else {
       currentUser = profileData;
       renderEventDashboard();
@@ -449,7 +450,6 @@ function renderLoginForm(slug) {
     </form>
   `;
 
-  // toggles
   const yesForm = document.getElementById('rsvpYesForm');
   const noForm = document.getElementById('rsvpNoForm');
   const alreadyForm = document.getElementById('loginForm');
@@ -457,7 +457,6 @@ function renderLoginForm(slug) {
   document.getElementById('chooseNo').onclick = () => { yesForm.style.display='none'; noForm.style.display='block'; alreadyForm.style.display='none'; };
   document.getElementById('chooseAlready').onclick = () => { yesForm.style.display='none'; noForm.style.display='none'; alreadyForm.style.display='block'; };
 
-  // handlers
   yesForm.addEventListener('submit', (e) => handleRsvpYes(e, slug));
   noForm.addEventListener('submit', handleRsvpNo);
   alreadyForm.addEventListener('submit', handleReturningLogin);
@@ -483,7 +482,6 @@ async function handleRsvpYes(e, slug) {
   const aliasEmail = constructEmail(cleanUsername, slug);
   const pwd = password || 'no-password';
 
-  // sign-in or sign-up then sign-in (alias email)
   let { error: signInErr } = await supabase.auth.signInWithPassword({ email: aliasEmail, password: pwd });
   if (signInErr) {
     const { error: signUpErr } = await supabase.auth.signUp({ email: aliasEmail, password: pwd });
@@ -511,12 +509,20 @@ async function handleRsvpYes(e, slug) {
     await supabase.from('event_users').update({ real_email: realEmail }).eq('id', profile.id);
   }
 
-  // mark RSVP yes (and opt into reminders)
+  // merge any anonymous "no" row → this user (optional Edge Function)
+  try {
+    await supabase.functions.invoke('merge-anon-no-to-user', {
+      body: { event_id: currentEvent.id, username: cleanUsername }
+    });
+  } catch { /* optional */ }
+
+  // mark RSVP yes + enable reminders + clear decline fields
   await supabase.from('event_users')
-    .update({ rsvp_status: 'yes', wants_reminders: true })
+    .update({ rsvp_status: 'yes', wants_reminders: true, decline_message: null, decline_at: null })
     .eq('id', userId).eq('event_id', currentEvent.id);
 
-  currentUser = profile;
+  // keep local state in sync for commit gating
+  currentUser = { ...profile, rsvp_status: 'yes', real_email: profile.real_email || realEmail || null };
   renderEventDashboard();
 }
 
@@ -529,11 +535,9 @@ async function handleRsvpNo(e) {
   if (nameErr) { setText('noErr', nameErr); show(errBox); return; }
   const cleanUsername = sanitizeUsername(rawName);
 
-  // 280-char cap to avoid DB bloat
   const rawMsg = (document.getElementById('noMsg').value || '').trim();
   const message = rawMsg.slice(0, 280);
 
-  // Try to find an existing (event_id, username) row
   const { data: existing } = await supabase
     .from('event_users')
     .select('id')
@@ -552,7 +556,6 @@ async function handleRsvpNo(e) {
         decline_at: nowIso
       }).eq('id', existing.id);
     } else {
-      // Create a lightweight decline row (generate id for safety)
       const id = (crypto && crypto.randomUUID) ? crypto.randomUUID() : 'decline_' + Math.random().toString(36).slice(2);
       await supabase.from('event_users').insert([{
         id,
@@ -565,7 +568,6 @@ async function handleRsvpNo(e) {
       }]);
     }
   } catch (error) {
-    // If local schema doesn't yet have decline_* columns, fall back to status-only update/insert
     const msg = String(error?.message || '');
     if (msg.includes('column') || error?.code === '42703') {
       if (existing?.id) {
@@ -588,15 +590,15 @@ async function handleRsvpNo(e) {
     }
   }
 
-  // BEST-EFFORT: also write to optional rsvps table (if exists) so the creator can see declines even without extra columns
+  // BEST-EFFORT fallback table
   try {
     await supabase.from('rsvps').upsert(
       [{ event_id: currentEvent.id, username: cleanUsername, status: 'no', message, created_at: nowIso }],
       { onConflict: ['event_id','username','status'] }
     );
-  } catch { /* table may not exist; ignore */ }
+  } catch {}
 
-  // If the viewer is signed in for this event, also mark their own row
+  // If viewer is signed in for this event, flip them to "no" AND remove commitments
   const { data: sessionData } = await supabase.auth.getSession();
   const userId = sessionData?.session?.user?.id;
   if (userId) {
@@ -613,9 +615,14 @@ async function handleRsvpNo(e) {
         wants_reminders: false
       }).eq('id', userId).eq('event_id', currentEvent.id);
     }
+    // delete commitments for this user
+    try {
+      await supabase.from('commitments').delete()
+        .eq('event_id', currentEvent.id)
+        .eq('user_id', userId);
+    } catch {}
   }
 
-  // Replace form with thank-you
   const noForm = document.getElementById('rsvpNoForm');
   if (noForm) noForm.innerHTML = `<p style="color:#1b5e20;">Thanks — we’ve let the host know you can’t make it.</p>`;
 }
@@ -631,12 +638,11 @@ async function handleReturningLogin(e) {
 
   let aliasEmail;
   if (/@/.test(identifier)) {
-    // Map real email → username for this event, then use alias email to auth
     const { data: row } = await supabase
       .from('event_users')
       .select('username')
       .eq('event_id', currentEvent.id)
-      .ilike('real_email', identifier)   // case-insensitive exact
+      .ilike('real_email', identifier)
       .maybeSingle();
     if (!row?.username) { setText('loginError', 'No attendee found with that email.'); show(errBox); return; }
     const cleanUsername = sanitizeUsername(row.username);
@@ -651,17 +657,14 @@ async function handleReturningLogin(e) {
   const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({ email: aliasEmail, password });
   if (signInErr) { setText('loginError', `Sign in failed: ${signInErr.message}`); show(errBox); return; }
 
-  // ensure event_users exists for this event (edge case)
   const userId = signInData.session.user.id;
   const { data: existingProfile } = await supabase
     .from('event_users').select('*').eq('id', userId).eq('event_id', currentEvent.id).maybeSingle();
   if (!existingProfile) {
-    // we only know the alias username; create the row
-    const aliasUsername = aliasEmail.split('@')[0].split('.')[0]; // best-effort from `${username}.${slug}@...`
+    const aliasUsername = aliasEmail.split('@')[0].split('.')[0];
     await supabase.from('event_users').insert([{ id: userId, event_id: currentEvent.id, username: aliasUsername }]);
   }
 
-  // proceed
   const { data: profile } = await supabase
     .from('event_users').select('*').eq('id', userId).eq('event_id', currentEvent.id).maybeSingle();
 
@@ -675,11 +678,17 @@ async function handleReturningLogin(e) {
 async function renderEventDashboard() {
   const app = document.getElementById('app');
   const isCreator = currentUser?.username === currentEvent.created_by;
-
   const googleMapsUrl = buildGoogleMapsUrl(currentEvent);
+
+  const deletionBanner = (currentEvent.delete_requested_at || currentEvent.marked_for_deletion)
+    ? `<p style="color:#b45309;background:#fffbeb;padding:8px;border:1px solid #f59e0b;border-radius:6px;">
+         This event is scheduled for deletion. New RSVPs and commitments may be disabled.
+       </p>`
+    : '';
 
   const eventInfoHTML = `
     <div class="event-info">
+      ${deletionBanner}
       ${currentEvent.event_description ? `<p class="event-description">${currentEvent.event_description}</p>` : ''}
       ${currentEvent.event_date ? `<p class="event-date">Date: ${currentEvent.event_date}</p>` : ''}
       ${currentEvent.event_time ? `<p class="event-time">Time: ${formatEventTime(currentEvent.event_time)}</p>` : ''}
@@ -696,26 +705,22 @@ async function renderEventDashboard() {
         ${ isCreator ? `
             <button id="editEventBtn" type="button">Edit Event</button>
             ${ currentEvent.collect_real_emails ? `<button id="sendRemindersBtn" type="button">Send Email Reminders</button>` : '' }
+            <button id="deleteEventBtn" type="button" style="background:#fee2e2;color:#7f1d1d;">Delete Event</button>
           ` : '' }
       </div>
     </div>
   `;
 
-  // creator summary box (above items/commitments)
   const creatorSummaryHTML = isCreator ? await renderCreatorSummaryBox() : '';
 
-  // Items section (creator vs viewer)
   const itemsSectionHTML = isCreator
     ? `
       <h3>Items Needed</h3>
-
-      <!-- CSV actions are always visible for creators -->
       <div class="csv-actions" style="margin:10px 0; display:flex; gap:8px; align-items:center;">
         <button id="exportCSV" type="button">Export CSV</button>
         <button id="importCSV" type="button">Import CSV</button>
         <input id="importCSVInput" type="file" accept=".csv,text/csv" style="display:none" />
       </div>
-
       ${renderManageItems()}
     `
     : `
@@ -736,22 +741,31 @@ async function renderEventDashboard() {
         <h3>Your Commitments</h3>
         <br><br>
         ${commitmentFormHTML}
+        <details id="declineInline" style="margin-top:12px;">
+          <summary style="cursor:pointer;">Can't make it? RSVP “No”</summary>
+          <form id="declineInlineForm" style="margin-top:8px;">
+            <label for="declineInlineMsg" style="display:block;margin-bottom:4px;">Message to host (optional)</label>
+            <textarea id="declineInlineMsg" rows="3" style="width:100%;"></textarea>
+            <div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end;">
+              <button type="submit">Confirm RSVP “No”</button>
+            </div>
+            <div id="declineInlineErr" style="display:none;color:#b00020;margin-top:.25rem;"></div>
+          </form>
+        </details>
       </div>
     </div>
   `;
 
   if (isCreator) {
     document.getElementById('addItemForm')?.addEventListener('submit', handleAddItem);
-
-    // CSV
     document.getElementById('exportCSV')?.addEventListener('click', exportCSV);
     const importBtn = document.getElementById('importCSV');
     const fileInput = document.getElementById('importCSVInput');
     importBtn?.addEventListener('click', () => fileInput.click());
     fileInput?.addEventListener('change', importCSVFile);
-
     document.getElementById('editEventBtn')?.addEventListener('click', showEditEventForm);
     document.getElementById('sendRemindersBtn')?.addEventListener('click', sendReminderEmails);
+    document.getElementById('deleteEventBtn')?.addEventListener('click', confirmDeleteEvent);
   }
 
   document.getElementById('copyShareUrl')?.addEventListener('click', async () => {
@@ -764,15 +778,17 @@ async function renderEventDashboard() {
     }
   });
 
+  document.getElementById('declineInlineForm')?.addEventListener('submit', declineFromDashboard);
+
   attachCommitListeners();
-  promptForEmailIfRequired(); // NEW
+  promptForEmailIfRequired();
 }
 
-// ---------- Creator Summary (color rows; no "Section/Details") ----------
+// ---------- Creator Summary ----------
 async function renderCreatorSummaryBox() {
   const counts = await getRsvpCounts();
-  const breakdownTable = await renderCommitmentBreakdownTable(); // pretty + colored
-  const declinesHTML = await renderDeclinesList(); // merges event_users + rsvps when available
+  const breakdownTable = await renderCommitmentBreakdownTable();
+  const declinesHTML = await renderDeclinesList();
 
   return `
     <details open style="margin:14px 0;border:1px solid #e5e7eb;border-radius:10px;background:#fff;">
@@ -796,17 +812,18 @@ async function renderCreatorSummaryBox() {
   `;
 }
 
-// Creator view: "RSVP No" list (event_users + optional rsvps; sorted desc)
+// "RSVP No" list (filters out stale fallback rows when username is not currently "no")
 async function renderDeclinesList() {
   let rows = [];
+  const noSet = new Set();
 
-  // event_users source
   try {
     const { data: eu, error } = await supabase
       .from('event_users')
       .select('username, decline_message, decline_at, created_at, rsvp_status')
       .eq('event_id', currentEvent.id);
     if (!error && Array.isArray(eu)) {
+      eu.forEach(r => { if (r.rsvp_status === 'no') noSet.add(String(r.username || '').toLowerCase()); });
       rows.push(
         ...eu
           .filter(r => r.rsvp_status === 'no')
@@ -819,7 +836,6 @@ async function renderDeclinesList() {
     }
   } catch {}
 
-  // optional rsvps fallback
   try {
     const { data: rs } = await supabase
       .from('rsvps')
@@ -828,16 +844,15 @@ async function renderDeclinesList() {
     if (Array.isArray(rs)) {
       rows.push(
         ...rs
-          .filter(r => r.status === 'no')
+          .filter(r => r.status === 'no' && !noSet.has(String(r.username || '').toLowerCase()))
           .map(r => ({ username: r.username, message: r.message, ts: r.created_at }))
       );
     }
-  } catch { /* table might not exist; ignore */ }
+  } catch {}
 
   if (!rows.length) return '';
 
   rows.sort((a,b) => new Date(b.ts) - new Date(a.ts));
-
   const esc = (s='') => s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
 
   return `
@@ -855,7 +870,7 @@ async function renderDeclinesList() {
   `;
 }
 
-// Pretty, color-coded commitment breakdown table
+// Commitment breakdown table
 async function renderCommitmentBreakdownTable() {
   const { data: usersData } = await supabase
     .from('event_users')
@@ -990,7 +1005,7 @@ function showEditEventForm() {
         event_place_id: newLocPlaceId || null,
         event_lat: newLocLat ? Number(newLocLat) : null,
         event_lng: newLocLng ? Number(newLocLng) : null,
-        collect_real_emails: collectEmails,
+        collect_real_emails: collectEmails
       })
       .eq('id', currentEvent.id);
 
@@ -1038,7 +1053,7 @@ function renderViewItems() {
   `).join('');
 }
 
-// ---------- Commitments UI (defaults to 0, supports uncommit, greys out when full) ----------
+// ---------- Commitments UI ----------
 async function renderCommitmentForm() {
   const { data: allCommitments } = await supabase
     .from('commitments').select('*').eq('event_id', currentEvent.id);
@@ -1059,7 +1074,6 @@ async function renderCommitmentForm() {
     const myQty = mine[item.id] ?? 0;
     const remaining = Math.max(0, item.quantity_required - total);
 
-    // available for others (ignore my current share)
     const availableForOthers = item.quantity_required - (total - myQty);
 
     let disabledAttr = '';
@@ -1087,7 +1101,6 @@ async function renderCommitmentForm() {
     else full.push(card);
   });
 
-  // --- NEW: extra spacing + horizontal divider between sections
   let html = '';
   if (committed.length) {
     html += `<h4 class="commit-sec-title">Items You’ve Committed To</h4>${committed.join('')}`;
@@ -1117,7 +1130,7 @@ async function handleAddItem(e) {
     event_id: currentEvent.id,
     item_name: newItemName,
     quantity_required: newItemQuantity,
-    ...(newItemDescription ? { item_description: newItemDescription } : {}),
+    ...(newItemDescription ? { item_description: newItemDescription } : {})
   };
   const { error } = await supabase.from('event_items').insert([insertData]);
   if (error) alert('Error adding item: ' + error.message);
@@ -1152,13 +1165,17 @@ async function deleteItem(itemId) {
 }
 
 async function commitItem(itemId) {
+  if (currentUser?.rsvp_status !== 'yes') {
+    alert('You need to RSVP “Yes” to make commitments.');
+    return;
+  }
+
   const inputEl = document.getElementById(`commit-${itemId}`);
   const raw = inputEl.value.trim();
   if (raw === '') { alert('Please enter a number (0 or more).'); return; }
   const quantity = Number(raw);
   if (!Number.isInteger(quantity) || quantity < 0) { alert('Please enter a non-negative integer.'); return; }
 
-  // Fetch required + current totals
   const { data: itemData, error: itemErr } = await supabase
     .from('event_items').select('quantity_required').eq('id', itemId).single();
   if (itemErr || !itemData) { alert(`Error fetching item details: ${itemErr?.message}`); return; }
@@ -1179,7 +1196,6 @@ async function commitItem(itemId) {
   }
 
   if (quantity === 0) {
-    // Uncommit: delete row
     await supabase.from('commitments')
       .delete()
       .eq('event_id', currentEvent.id)
@@ -1190,6 +1206,33 @@ async function commitItem(itemId) {
       { event_id: currentEvent.id, user_id: currentUser.id, item_id: itemId, quantity }
     ], { onConflict: ['event_id', 'user_id', 'item_id'] });
   }
+
+  await loadEvent(currentEvent.slug);
+}
+
+// inline decline from dashboard (yes → no) + delete commitments
+async function declineFromDashboard(e) {
+  e.preventDefault();
+  const msgEl = document.getElementById('declineInlineMsg');
+  const errEl = document.getElementById('declineInlineErr');
+  setText('declineInlineErr',''); hide(errEl);
+
+  if (!currentUser) { alert('Please sign in first.'); return; }
+
+  const nowIso = new Date().toISOString();
+  const message = (msgEl.value || '').trim().slice(0, 280);
+
+  const { error: uErr } = await supabase.from('event_users').update({
+    rsvp_status: 'no',
+    wants_reminders: false,
+    decline_message: message || null,
+    decline_at: nowIso
+  }).eq('id', currentUser.id).eq('event_id', currentEvent.id);
+  if (uErr) { setText('declineInlineErr', `Error updating RSVP: ${uErr.message}`); show(errEl); return; }
+
+  await supabase.from('commitments').delete()
+    .eq('event_id', currentEvent.id)
+    .eq('user_id', currentUser.id);
 
   await loadEvent(currentEvent.slug);
 }
@@ -1230,7 +1273,7 @@ async function handleUpdateEventDetails(e) {
       event_place_id: updatedLocPlace || null,
       event_lat: updatedLocLat ? Number(updatedLocLat) : null,
       event_lng: updatedLocLng ? Number(updatedLocLng) : null,
-      collect_real_emails: updatedCollect,
+      collect_real_emails: updatedCollect
     })
     .eq('id', currentEvent.id);
 
@@ -1239,7 +1282,7 @@ async function handleUpdateEventDetails(e) {
 }
 
 // ----------------------
-// CSV Export & Import Functionality
+// CSV Export & Import
 // ----------------------
 function csvEscape(v) {
   if (v == null) return '';
@@ -1336,7 +1379,7 @@ async function importCSVFile(evt) {
 }
 
 // ----------------------
-// 5. Helper: Attach Commit Listeners (stub)
+// 5. Helper: Commit Listeners
 // ----------------------
 function attachCommitListeners() {
   // Inline onclick handlers in renderCommitmentForm already handle commitments.
@@ -1380,7 +1423,6 @@ async function sendReminderEmails() {
   const btn = document.getElementById('sendRemindersBtn');
   if (!btn) return;
 
-  // simple client-side guard; server enforces the real window
   const now = Date.now();
   const until = Number(btn.dataset.cooldownUntil || 0);
   if (until && now < until) {
@@ -1389,13 +1431,10 @@ async function sendReminderEmails() {
     return;
   }
 
-  // --- modal to collect an optional note from the host ---
   const overlay = document.createElement('div');
-  overlay.style =
-    'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:3000;';
+  overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:3000;';
   const box = document.createElement('div');
-  box.style =
-    'background:#fff;padding:20px;border-radius:10px;max-width:520px;width:92%;';
+  box.style = 'background:#fff;padding:20px;border-radius:10px;max-width:520px;width:92%;';
   box.innerHTML = `
     <h3 style="margin:0 0 8px">Send reminder emails</h3>
     <p style="margin:0 0 8px;color:#555">
@@ -1413,7 +1452,6 @@ async function sendReminderEmails() {
   document.getElementById('cancelSend').onclick = () => overlay.remove();
 
   document.getElementById('confirmSend').onclick = async () => {
-    // sanitize + cap length so payloads are small and safe
     const hostMsg = (document.getElementById('hostMsg').value || '')
       .trim()
       .replace(/\r?\n/g, '\n')
@@ -1463,7 +1501,56 @@ async function sendReminderEmails() {
   };
 }
 
-// Expose functions so inline onclick attributes can find them.
+// Creator: mark event for deletion + optional purge
+function confirmDeleteEvent() {
+  if (currentUser?.username !== currentEvent.created_by) return;
+
+  const overlay = document.createElement('div');
+  overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:3000;';
+  const box = document.createElement('div');
+  box.style = 'background:#fff;padding:20px;border-radius:10px;max-width:480px;width:92%;';
+  box.innerHTML = `
+    <h3 style="margin:0 0 8px">Delete this event?</h3>
+    <p style="margin:0 0 10px;color:#444">This will mark the event for deletion. A server job will remove the event and all associated data.</p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button id="cancelDelete" type="button">Cancel</button>
+      <button id="confirmDelete" type="button" style="background:#b91c1c;color:#fff;">Mark for deletion</button>
+    </div>
+  `;
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  document.getElementById('cancelDelete').onclick = () => overlay.remove();
+  document.getElementById('confirmDelete').onclick = async () => {
+    const nowIso = new Date().toISOString();
+    let ok = true;
+    let errMsg = '';
+    try {
+      const { error } = await supabase.from('events')
+        .update({ delete_requested_at: nowIso })
+        .eq('id', currentEvent.id);
+      if (error) throw error;
+    } catch (e) {
+      try {
+        const { error } = await supabase.from('events')
+          .update({ marked_for_deletion: true })
+          .eq('id', currentEvent.id);
+        if (error) throw error;
+      } catch (e2) { ok = false; errMsg = e2.message || String(e2); }
+    }
+
+    if (!ok) { alert('Could not mark event for deletion: ' + errMsg); return; }
+
+    try { await supabase.functions.invoke('purge-deleted-events', { body: { event_id: currentEvent.id } }); } catch {}
+
+    overlay.remove();
+    alert('Event has been marked for deletion.');
+    window.location.hash = '';
+    renderCreateEventForm();
+  };
+}
+
+// Expose functions for inline handlers
 window.updateItem = updateItem;
 window.deleteItem = deleteItem;
 window.commitItem = commitItem;
