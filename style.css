@@ -268,3 +268,9 @@ footer {
 #app {
   padding-bottom: 4vh; /* Adds space before footer */
 }
+
+.creator-summary table { width: 100%; border-collapse: collapse; }
+.creator-summary th, .creator-summary td { padding: .35rem .6rem; text-align: left; }
+.creator-summary thead tr { background: #eef2f7; }
+.creator-summary tbody tr:nth-child(even) { background: #f8fafc; }
+.creator-summary details { margin-bottom: 10px; }

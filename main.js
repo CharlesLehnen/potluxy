@@ -1,4 +1,4 @@
- // main.js (Google Maps-only link version + email collection)
+// main.js (Google Maps-only link version + email collection)
 // Import Supabase client and config
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
@@ -7,6 +7,23 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let currentEvent = null;
 let currentUser = null; // Managed via supabase.auth
+
+// --- NEW: tiny styles (spacing/dividers + colored table rows) ---
+(() => {
+  const s = document.createElement('style');
+  s.textContent = `
+    .commit-sec-title{margin:18px 0 12px;padding-left:10px;border-left:4px solid #0284c7}
+    .commit-sec-title.open{border-color:#16a34a}
+    .commit-sec-title.full{border-color:#334155}
+    .sec-divider{height:1px;background:#e6e8eb;margin:22px 0}
+    .pill{display:inline-block;padding:3px 10px;border-radius:999px;border:1px solid #e5e7eb}
+    .cb-head{background:#f4f7fb}
+    .cb-row-full{background:#eef7ee}     /* muted green */
+    .cb-row-partial{background:#fff8db}  /* muted yellow */
+    .cb-row-open{background:#fdecec}     /* muted red   */
+  `;
+  document.head.appendChild(s);
+})();
 
 // ✨ Helpers: UI messaging + username sanitation/validation
 function setText(id, msg) {
@@ -30,6 +47,37 @@ function validateUsername(raw) {
 // Utility: Construct event-specific email from (sanitized) username and event slug.
 function constructEmail(username, slug) {
   return `${username}.${slug}@mailinator.com`;
+}
+
+// Helper: counts for going/no (no "maybe") with rsvps fallback when available
+async function getRsvpCounts() {
+  const c = { yes: 0, no: 0 };
+
+  // event_users status
+  const { data: eu, error: euErr } = await supabase
+    .from('event_users')
+    .select('rsvp_status')
+    .eq('event_id', currentEvent.id);
+
+  if (!euErr && Array.isArray(eu)) {
+    eu.forEach(r => {
+      if (r.rsvp_status === 'yes') c.yes++;
+      else if (r.rsvp_status === 'no') c.no++;
+    });
+  }
+
+  // optional fallback: rsvps (if table exists and policy allows)
+  try {
+    const { data: rs } = await supabase
+      .from('rsvps')
+      .select('status')
+      .eq('event_id', currentEvent.id);
+    if (Array.isArray(rs)) {
+      c.no += rs.filter(r => r.status === 'no').length;
+    }
+  } catch { /* table may not exist; ignore */ }
+
+  return c;
 }
 
 // -----------------------------------------------------------------------------
@@ -305,7 +353,7 @@ async function loadEvent(slug) {
 
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) {
-    renderLoginForm(slug);
+    renderLoginForm(slug); // shows triage panel
   } else {
     const { data: profileData } = await supabase
       .from('event_users')
@@ -314,7 +362,7 @@ async function loadEvent(slug) {
       .eq('event_id', currentEvent.id)
       .maybeSingle();
     if (!profileData) {
-      renderLoginForm(slug);
+      renderLoginForm(slug); // triage panel again
     } else {
       currentUser = profileData;
       renderEventDashboard();
@@ -322,105 +370,302 @@ async function loadEvent(slug) {
   }
 }
 
-// ✨ Login form with inline error and contextual labels
+// ----------------------
+// 2a) Recipient RSVP panel (no pop-ups)
+// ----------------------
 function renderLoginForm(slug) {
   const requiresEmail = !!currentEvent.collect_real_emails;
-  const nameLabel = requiresEmail ? 'Your Name:' : 'Username:';
+  const googleMapsUrl = buildGoogleMapsUrl(currentEvent);
 
   const app = document.getElementById('app');
   app.innerHTML = `
     <h2 class="event-title">${currentEvent.event_name}</h2>
-    <form id="loginForm" class="form">
-      <div id="loginError" style="display:none;color:#b00020;margin:.25rem 0;"></div>
 
-      <label for="username">${nameLabel}</label>
-      <input type="text" id="username" required placeholder="e.g., Jane Doe">
+    <div class="event-info">
+      ${currentEvent.event_description ? `<p class="event-description">${currentEvent.event_description}</p>` : ''}
+      ${currentEvent.event_date ? `<p class="event-date">Date: ${currentEvent.event_date}</p>` : ''}
+      ${currentEvent.event_time ? `<p class="event-time">Time: ${formatEventTime(currentEvent.event_time)}</p>` : ''}
+      ${
+        currentEvent.event_location
+          ? `<p class="event-location">
+               Location: ${currentEvent.event_location}
+               ${googleMapsUrl ? `(<a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer">open in Google Maps</a>)` : ''}
+             </p>`
+          : ''
+      }
+    </div>
 
+    <div class="form">
+      <h3 style="text-align:center">How would you like to respond?</h3>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:10px;">
+        <button id="chooseYes" type="button">RSVP Yes</button>
+        <button id="chooseNo" type="button">RSVP No</button>
+        <button id="chooseAlready" type="button">I already RSVP'd</button>
+      </div>
+      <p style="text-align:center;color:#666;font-size:.85rem;margin-top:8px;">
+        Email will only be required if the host enabled it for this event.
+      </p>
+    </div>
+
+    <!-- YES -->
+    <form id="rsvpYesForm" class="form" style="display:none;">
+      <div id="yesErr" style="display:none;color:#b00020;margin:.25rem 0;"></div>
+      <label for="yesName">Name</label>
+      <input type="text" id="yesName" placeholder="e.g., Jane Doe" required>
       ${
         requiresEmail
           ? `
-        <label for="realEmail">Email (required):</label>
-        <input type="email" id="realEmail" required placeholder="you@example.com">
-        <p style="font-size:.8rem;color:#666;">Host is collecting emails for this event.</p>`
-          : `<input type="email" id="realEmail" style="display:none;">`
+            <label for="yesEmail">Email (required)</label>
+            <input type="email" id="yesEmail" placeholder="you@example.com" required>
+            <p style="font-size:.8rem;color:#666;">The host required email for reminders.</p>
+            `
+          : ''
       }
+      <label for="yesPwd">Create a password (optional)</label>
+      <input type="password" id="yesPwd" placeholder="Set one if you want to sign back in">
 
-      <label for="password">Password (optional):</label>
-      <input type="password" id="password">
-      <button type="submit">Login / Sign Up</button>
+      <button type="submit">Join Event</button>
     </form>
-    <p>If you don't have an account for this event, signing up will create one.</p>
+
+    <!-- NO -->
+    <form id="rsvpNoForm" class="form" style="display:none;">
+      <div id="noErr" style="display:none;color:#b00020;margin:.25rem 0;"></div>
+      <label for="noName">Name</label>
+      <input type="text" id="noName" placeholder="e.g., Sam" required>
+      <label for="noMsg">Message to host (optional)</label>
+      <textarea id="noMsg" placeholder="So sorry—out of town."></textarea>
+      <button type="submit" class="login">Send</button>
+      <p style="font-size:.85rem;color:#666;margin-top:6px;">Thanks — we’ll let the host know.</p>
+    </form>
+
+    <!-- ALREADY -->
+    <form id="loginForm" class="form" style="display:none;">
+      <div id="loginError" style="display:none;color:#b00020;margin:.25rem 0;"></div>
+      <label for="loginIdent">Name or Email</label>
+      <input type="text" id="loginIdent" placeholder="Name or Email" required>
+      <label for="loginPwd">Password</label>
+      <input type="password" id="loginPwd" required>
+      <button type="submit" class="login">Log In</button>
+    </form>
   `;
-  document.getElementById('loginForm').addEventListener('submit', (e) => handleLogin(e, slug));
+
+  // toggles
+  const yesForm = document.getElementById('rsvpYesForm');
+  const noForm = document.getElementById('rsvpNoForm');
+  const alreadyForm = document.getElementById('loginForm');
+  document.getElementById('chooseYes').onclick = () => { yesForm.style.display='block'; noForm.style.display='none'; alreadyForm.style.display='none'; };
+  document.getElementById('chooseNo').onclick = () => { yesForm.style.display='none'; noForm.style.display='block'; alreadyForm.style.display='none'; };
+  document.getElementById('chooseAlready').onclick = () => { yesForm.style.display='none'; noForm.style.display='none'; alreadyForm.style.display='block'; };
+
+  // handlers
+  yesForm.addEventListener('submit', (e) => handleRsvpYes(e, slug));
+  noForm.addEventListener('submit', handleRsvpNo);
+  alreadyForm.addEventListener('submit', handleReturningLogin);
 }
 
-async function handleLogin(e, slug) {
+// ----------------------
+// 2b) RSVP handlers
+// ----------------------
+async function handleRsvpYes(e, slug) {
+  e.preventDefault();
+  const errBox = document.getElementById('yesErr'); setText('yesErr',''); hide(errBox);
+
+  const rawName = document.getElementById('yesName').value.trim();
+  const password = document.getElementById('yesPwd').value.trim();
+  const requiresEmail = !!currentEvent.collect_real_emails;
+  const realEmail = requiresEmail ? document.getElementById('yesEmail').value.trim() : '';
+
+  const nameErr = validateUsername(rawName);
+  if (nameErr) { setText('yesErr', nameErr); show(errBox); return; }
+  if (requiresEmail && !realEmail) { setText('yesErr', 'Email is required for this event.'); show(errBox); return; }
+
+  const cleanUsername = sanitizeUsername(rawName);
+  const aliasEmail = constructEmail(cleanUsername, slug);
+  const pwd = password || 'no-password';
+
+  // sign-in or sign-up then sign-in (alias email)
+  let { error: signInErr } = await supabase.auth.signInWithPassword({ email: aliasEmail, password: pwd });
+  if (signInErr) {
+    const { error: signUpErr } = await supabase.auth.signUp({ email: aliasEmail, password: pwd });
+    if (signUpErr && !/already|registered/i.test(signUpErr.message)) {
+      setText('yesErr', `Sign up failed: ${signUpErr.message}`); show(errBox); return;
+    }
+    const { error: signInErr2 } = await supabase.auth.signInWithPassword({ email: aliasEmail, password: pwd });
+    if (signInErr2) { setText('yesErr', `Sign in failed: ${signInErr2.message}`); show(errBox); return; }
+  }
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (!sessionData?.session) { setText('yesErr', 'Could not establish a session.'); show(errBox); return; }
+  const userId = sessionData.session.user.id;
+
+  // ensure event_users row
+  let { data: profile } = await supabase.from('event_users')
+    .select('*').eq('id', userId).eq('event_id', currentEvent.id).maybeSingle();
+
+  if (!profile) {
+    const ins = { id: userId, event_id: currentEvent.id, username: cleanUsername, ...(requiresEmail ? { real_email: realEmail } : {}) };
+    const { data: newProf, error: profErr } = await supabase.from('event_users').insert([ins]).select().single();
+    if (profErr) { setText('yesErr', `Error creating attendee: ${profErr.message}`); show(errBox); return; }
+    profile = newProf;
+  } else if (requiresEmail && !profile.real_email && realEmail) {
+    await supabase.from('event_users').update({ real_email: realEmail }).eq('id', profile.id);
+  }
+
+  // mark RSVP yes (and opt into reminders)
+  await supabase.from('event_users')
+    .update({ rsvp_status: 'yes', wants_reminders: true })
+    .eq('id', userId).eq('event_id', currentEvent.id);
+
+  currentUser = profile;
+  renderEventDashboard();
+}
+
+async function handleRsvpNo(e) {
+  e.preventDefault();
+  const errBox = document.getElementById('noErr'); setText('noErr',''); hide(errBox);
+
+  const rawName = document.getElementById('noName').value.trim();
+  const nameErr = validateUsername(rawName);
+  if (nameErr) { setText('noErr', nameErr); show(errBox); return; }
+  const cleanUsername = sanitizeUsername(rawName);
+
+  // 280-char cap to avoid DB bloat
+  const rawMsg = (document.getElementById('noMsg').value || '').trim();
+  const message = rawMsg.slice(0, 280);
+
+  // Try to find an existing (event_id, username) row
+  const { data: existing } = await supabase
+    .from('event_users')
+    .select('id')
+    .eq('event_id', currentEvent.id)
+    .eq('username', cleanUsername)
+    .maybeSingle();
+
+  const nowIso = new Date().toISOString();
+
+  try {
+    if (existing?.id) {
+      await supabase.from('event_users').update({
+        rsvp_status: 'no',
+        wants_reminders: false,
+        decline_message: message || null,
+        decline_at: nowIso
+      }).eq('id', existing.id);
+    } else {
+      // Create a lightweight decline row (generate id for safety)
+      const id = (crypto && crypto.randomUUID) ? crypto.randomUUID() : 'decline_' + Math.random().toString(36).slice(2);
+      await supabase.from('event_users').insert([{
+        id,
+        event_id: currentEvent.id,
+        username: cleanUsername,
+        rsvp_status: 'no',
+        wants_reminders: false,
+        decline_message: message || null,
+        decline_at: nowIso
+      }]);
+    }
+  } catch (error) {
+    // If local schema doesn't yet have decline_* columns, fall back to status-only update/insert
+    const msg = String(error?.message || '');
+    if (msg.includes('column') || error?.code === '42703') {
+      if (existing?.id) {
+        await supabase.from('event_users').update({
+          rsvp_status: 'no',
+          wants_reminders: false
+        }).eq('id', existing.id);
+      } else {
+        const id = (crypto && crypto.randomUUID) ? crypto.randomUUID() : 'decline_' + Math.random().toString(36).slice(2);
+        await supabase.from('event_users').insert([{
+          id,
+          event_id: currentEvent.id,
+          username: cleanUsername,
+          rsvp_status: 'no',
+          wants_reminders: false
+        }]);
+      }
+    } else {
+      setText('noErr', `Could not record decline: ${error.message || 'Unknown error'}`); show(errBox); return;
+    }
+  }
+
+  // BEST-EFFORT: also write to optional rsvps table (if exists) so the creator can see declines even without extra columns
+  try {
+    await supabase.from('rsvps').upsert(
+      [{ event_id: currentEvent.id, username: cleanUsername, status: 'no', message, created_at: nowIso }],
+      { onConflict: ['event_id','username','status'] }
+    );
+  } catch { /* table may not exist; ignore */ }
+
+  // If the viewer is signed in for this event, also mark their own row
+  const { data: sessionData } = await supabase.auth.getSession();
+  const userId = sessionData?.session?.user?.id;
+  if (userId) {
+    try {
+      await supabase.from('event_users').update({
+        rsvp_status: 'no',
+        wants_reminders: false,
+        decline_message: message || null,
+        decline_at: nowIso
+      }).eq('id', userId).eq('event_id', currentEvent.id);
+    } catch {
+      await supabase.from('event_users').update({
+        rsvp_status: 'no',
+        wants_reminders: false
+      }).eq('id', userId).eq('event_id', currentEvent.id);
+    }
+  }
+
+  // Replace form with thank-you
+  const noForm = document.getElementById('rsvpNoForm');
+  if (noForm) noForm.innerHTML = `<p style="color:#1b5e20;">Thanks — we’ve let the host know you can’t make it.</p>`;
+}
+
+async function handleReturningLogin(e) {
   e.preventDefault();
   const errBox = document.getElementById('loginError'); setText('loginError',''); hide(errBox);
 
-  const rawUsername = document.getElementById('username').value.trim();
-  const password = document.getElementById('password').value.trim();
-  const realEmailInput = document.getElementById('realEmail');
-  const realEmail = realEmailInput ? realEmailInput.value.trim() : '';
-  const requiresEmail = !!currentEvent.collect_real_emails;
+  const identifier = document.getElementById('loginIdent').value.trim();
+  const password = document.getElementById('loginPwd').value.trim();
+  if (!identifier) { setText('loginError', 'Enter your name or email.'); show(errBox); return; }
+  if (!password) { setText('loginError', 'Please enter your password.'); show(errBox); return; }
 
-  const usernameErr = validateUsername(rawUsername);
-  if (usernameErr) { setText('loginError', usernameErr); show(errBox); return; }
-  if (requiresEmail && !realEmail) { setText('loginError', 'Email is required for this event.'); show(errBox); return; }
-
-  const cleanUsername = sanitizeUsername(rawUsername);
-  const email = constructEmail(cleanUsername, slug);
-  const pwd = password || 'no-password';
-
-  let { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password: pwd });
-  if (signInError) {
-    if (/invalid login credentials/i.test(signInError.message)) {
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({ email, password: pwd });
-      if (signUpError && !/already|registered/i.test(signUpError.message)) {
-        setText('loginError', `Sign up failed: ${signUpError.message}`); show(errBox); return;
-      }
-      // try to sign in again
-      const { data: signIn2, error: signInErr2 } = await supabase.auth.signInWithPassword({ email, password: pwd });
-      if (signInErr2) { setText('loginError', `Sign in failed: ${signInErr2.message}`); show(errBox); return; }
-      signInData = signIn2;
-    } else {
-      setText('loginError', `Sign in failed: ${signInError.message}`); show(errBox); return;
-    }
-  }
-
-  // ensure event profile exists
-  const { data: existingProfile } = await supabase
-    .from('event_users')
-    .select('*')
-    .eq('id', signInData.session.user.id)
-    .eq('event_id', currentEvent.id)
-    .maybeSingle();
-
-  let finalProfile = existingProfile;
-
-  if (!existingProfile) {
-    const { data: newProfile, error: newProfileError } = await supabase
+  let aliasEmail;
+  if (/@/.test(identifier)) {
+    // Map real email → username for this event, then use alias email to auth
+    const { data: row } = await supabase
       .from('event_users')
-      .insert([{ id: signInData.session.user.id, event_id: currentEvent.id, username: cleanUsername }])
-      .select()
-      .single();
-    if (newProfileError) { setText('loginError', `Error creating event user: ${newProfileError.message}`); show(errBox); return; }
-    finalProfile = newProfile;
+      .select('username')
+      .eq('event_id', currentEvent.id)
+      .ilike('real_email', identifier)   // case-insensitive exact
+      .maybeSingle();
+    if (!row?.username) { setText('loginError', 'No attendee found with that email.'); show(errBox); return; }
+    const cleanUsername = sanitizeUsername(row.username);
+    aliasEmail = constructEmail(cleanUsername, currentEvent.slug);
+  } else {
+    const cleanUsername = sanitizeUsername(identifier);
+    const ve = validateUsername(cleanUsername);
+    if (ve) { setText('loginError', ve); show(errBox); return; }
+    aliasEmail = constructEmail(cleanUsername, currentEvent.slug);
   }
 
-  if (requiresEmail) {
-    const currentEmail = finalProfile.real_email;
-    if (!currentEmail && realEmail) {
-      const { error: updErr } = await supabase
-        .from('event_users')
-        .update({ real_email: realEmail })
-        .eq('id', finalProfile.id);
-      if (updErr) { setText('loginError', `Could not save attendee email: ${updErr.message}`); show(errBox); }
-      else { finalProfile.real_email = realEmail; }
-    }
+  const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({ email: aliasEmail, password });
+  if (signInErr) { setText('loginError', `Sign in failed: ${signInErr.message}`); show(errBox); return; }
+
+  // ensure event_users exists for this event (edge case)
+  const userId = signInData.session.user.id;
+  const { data: existingProfile } = await supabase
+    .from('event_users').select('*').eq('id', userId).eq('event_id', currentEvent.id).maybeSingle();
+  if (!existingProfile) {
+    // we only know the alias username; create the row
+    const aliasUsername = aliasEmail.split('@')[0].split('.')[0]; // best-effort from `${username}.${slug}@...`
+    await supabase.from('event_users').insert([{ id: userId, event_id: currentEvent.id, username: aliasUsername }]);
   }
 
-  currentUser = finalProfile;
+  // proceed
+  const { data: profile } = await supabase
+    .from('event_users').select('*').eq('id', userId).eq('event_id', currentEvent.id).maybeSingle();
+
+  currentUser = profile || null;
   renderEventDashboard();
 }
 
@@ -432,23 +677,6 @@ async function renderEventDashboard() {
   const isCreator = currentUser?.username === currentEvent.created_by;
 
   const googleMapsUrl = buildGoogleMapsUrl(currentEvent);
-
-  // creator-only email list if collecting
-  let emailsHTML = '';
-  if (isCreator && currentEvent.collect_real_emails) {
-    const { data: attendeeRows } = await supabase
-      .from('event_users')
-      .select('username, real_email')
-      .eq('event_id', currentEvent.id)
-      .order('username', { ascending: true });
-
-    emailsHTML = `
-      <h4>Attendee Emails</h4>
-      <ul>
-        ${(attendeeRows || []).filter((r) => r.real_email).map((r) => `<li>${r.username} — ${r.real_email}</li>`).join('')}
-      </ul>
-    `;
-  }
 
   const eventInfoHTML = `
     <div class="event-info">
@@ -465,19 +693,20 @@ async function renderEventDashboard() {
       <div id="shareUrlContainer">
         <input type="text" id="shareUrl" value="${location.origin}/#/event/${currentEvent.slug}" readonly>
         <button id="copyShareUrl" type="button">Copy URL to Share Event</button>
-        ${ isCreator ? `<button id="editEventBtn" type="button">Edit Event</button>
-                         <button id="sendRemindersBtn" type="button">Send Email Reminders</button>` : '' }
+        ${ isCreator ? `
+            <button id="editEventBtn" type="button">Edit Event</button>
+            ${ currentEvent.collect_real_emails ? `<button id="sendRemindersBtn" type="button">Send Email Reminders</button>` : '' }
+          ` : '' }
       </div>
     </div>
   `;
 
-  let itemsSectionHTML = '';
-  if (isCreator) {
-    const commitmentBreakdownHTML = await renderCommitmentBreakdown();
-    itemsSectionHTML = `
-      ${emailsHTML}
-      <div class="commitment-breakdown">${commitmentBreakdownHTML}</div>
+  // creator summary box (above items/commitments)
+  const creatorSummaryHTML = isCreator ? await renderCreatorSummaryBox() : '';
 
+  // Items section (creator vs viewer)
+  const itemsSectionHTML = isCreator
+    ? `
       <h3>Items Needed</h3>
 
       <!-- CSV actions are always visible for creators -->
@@ -488,20 +717,19 @@ async function renderEventDashboard() {
       </div>
 
       ${renderManageItems()}
-    `;
-  } else {
-    itemsSectionHTML = `
+    `
+    : `
       <h3>Items Needed</h3>
       <br><br>
       ${renderViewItems()}
     `;
-  }
 
   const commitmentFormHTML = await renderCommitmentForm();
 
   app.innerHTML = `
     <h2 class="event-title">${currentEvent.event_name}</h2>
     ${eventInfoHTML}
+    ${creatorSummaryHTML}
     <div class="dashboard">
       <div class="items">${itemsSectionHTML}</div>
       <div class="commitments">
@@ -516,33 +744,170 @@ async function renderEventDashboard() {
     document.getElementById('addItemForm')?.addEventListener('submit', handleAddItem);
 
     // CSV
-    const exportBtn = document.getElementById('exportCSV');
+    document.getElementById('exportCSV')?.addEventListener('click', exportCSV);
     const importBtn = document.getElementById('importCSV');
     const fileInput = document.getElementById('importCSVInput');
-    exportBtn.addEventListener('click', exportCSV);
-    importBtn.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', importCSVFile);
+    importBtn?.addEventListener('click', () => fileInput.click());
+    fileInput?.addEventListener('change', importCSVFile);
 
-    const editBtn = document.getElementById('editEventBtn');
-    if (editBtn) editBtn.addEventListener('click', showEditEventForm);
-
-    const sendBtn = document.getElementById('sendRemindersBtn');
-    if (sendBtn) sendBtn.addEventListener('click', sendReminderEmails);
+    document.getElementById('editEventBtn')?.addEventListener('click', showEditEventForm);
+    document.getElementById('sendRemindersBtn')?.addEventListener('click', sendReminderEmails);
   }
 
-  const copyBtn = document.getElementById('copyShareUrl');
-  if (copyBtn) {
-    copyBtn.addEventListener('click', async () => {
-      const url = `${location.origin}/#/event/${currentEvent.slug}`;
-      try { await navigator.clipboard.writeText(url); console.log('Copied!'); }
-      catch {
-        const shareInput = document.getElementById('shareUrl'); shareInput.select(); document.execCommand('copy');
-      }
-    });
-  }
+  document.getElementById('copyShareUrl')?.addEventListener('click', async () => {
+    const url = `${location.origin}/#/event/${currentEvent.slug}`;
+    try { await navigator.clipboard.writeText(url); }
+    catch {
+      const shareInput = document.getElementById('shareUrl');
+      shareInput.select();
+      document.execCommand('copy');
+    }
+  });
 
   attachCommitListeners();
   promptForEmailIfRequired(); // NEW
+}
+
+// ---------- Creator Summary (color rows; no "Section/Details") ----------
+async function renderCreatorSummaryBox() {
+  const counts = await getRsvpCounts();
+  const breakdownTable = await renderCommitmentBreakdownTable(); // pretty + colored
+  const declinesHTML = await renderDeclinesList(); // merges event_users + rsvps when available
+
+  return `
+    <details open style="margin:14px 0;border:1px solid #e5e7eb;border-radius:10px;background:#fff;">
+      <summary style="cursor:pointer;padding:.7rem 1rem;font-weight:600;color:#0f172a">
+        Event Summary — <span style="color:#0a5">${counts.yes} going</span> · <span style="color:#a00">${counts.no} no</span>
+      </summary>
+      <div style="padding:.75rem 1rem 1rem 1rem;">
+        ${breakdownTable ? `
+          <div style="margin:.5rem 0 1rem 0;">
+            <div style="font-weight:600;margin-bottom:.25rem;">Commitment Breakdown</div>
+            ${breakdownTable}
+          </div>` : ''}
+
+        ${declinesHTML ? `
+          <div style="margin:1rem 0;">
+            <div style="font-weight:600;margin-bottom:.25rem;">RSVP “No”</div>
+            ${declinesHTML}
+          </div>` : ''}
+      </div>
+    </details>
+  `;
+}
+
+// Creator view: "RSVP No" list (event_users + optional rsvps; sorted desc)
+async function renderDeclinesList() {
+  let rows = [];
+
+  // event_users source
+  try {
+    const { data: eu, error } = await supabase
+      .from('event_users')
+      .select('username, decline_message, decline_at, created_at, rsvp_status')
+      .eq('event_id', currentEvent.id);
+    if (!error && Array.isArray(eu)) {
+      rows.push(
+        ...eu
+          .filter(r => r.rsvp_status === 'no')
+          .map(d => ({
+            username: d.username,
+            message: d.decline_message,
+            ts: d.decline_at || d.created_at
+          }))
+      );
+    }
+  } catch {}
+
+  // optional rsvps fallback
+  try {
+    const { data: rs } = await supabase
+      .from('rsvps')
+      .select('username, message, created_at, status')
+      .eq('event_id', currentEvent.id);
+    if (Array.isArray(rs)) {
+      rows.push(
+        ...rs
+          .filter(r => r.status === 'no')
+          .map(r => ({ username: r.username, message: r.message, ts: r.created_at }))
+      );
+    }
+  } catch { /* table might not exist; ignore */ }
+
+  if (!rows.length) return '';
+
+  rows.sort((a,b) => new Date(b.ts) - new Date(a.ts));
+
+  const esc = (s='') => s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+  return `
+    <ul style="list-style:none;padding:0;margin:0;">
+      ${rows.map(d => `
+        <li style="margin:.5rem 0; padding:.5rem .75rem; background:#fafafa; border:1px solid #eee; border-radius:8px;">
+          <strong>${esc(d.username)}</strong>
+          ${d.message ? ` — <em>${esc(d.message)}</em>` : ''}
+          <div style="color:#666;font-size:.85rem;margin-top:2px;">
+            ${new Date(d.ts).toLocaleString()}
+          </div>
+        </li>
+      `).join('')}
+    </ul>
+  `;
+}
+
+// Pretty, color-coded commitment breakdown table
+async function renderCommitmentBreakdownTable() {
+  const { data: usersData } = await supabase
+    .from('event_users')
+    .select('id, username')
+    .eq('event_id', currentEvent.id);
+  const nameById = Object.fromEntries((usersData || []).map(u => [u.id, u.username]));
+
+  const { data: rows } = await supabase
+    .from('commitments')
+    .select('quantity, item_id, user_id')
+    .eq('event_id', currentEvent.id);
+
+  if (!rows || rows.length === 0) return '';
+
+  const byItem = {};
+  rows.forEach(r => {
+    const itemId = r.item_id;
+    if (!byItem[itemId]) byItem[itemId] = [];
+    byItem[itemId].push({ user: nameById[r.user_id] || 'Unknown', qty: Number(r.quantity || 0) });
+  });
+
+  const body = currentEvent.items.map(it => {
+    const list = byItem[it.id] || [];
+    const total = list.reduce((s, r) => s + r.qty, 0);
+    const chips = list.map(r => `<span class="pill">${r.user} × ${r.qty}</span>`).join(' ');
+    let cls = 'cb-row-open';
+    if (total >= it.quantity_required && it.quantity_required > 0) cls = 'cb-row-full';
+    else if (total > 0 && total < it.quantity_required) cls = 'cb-row-partial';
+
+    return `
+      <tr class="${cls}">
+        <td style="padding:10px 12px;">${it.item_name}</td>
+        <td style="padding:10px 12px;">${it.quantity_required}</td>
+        <td style="padding:10px 12px;">${total}</td>
+        <td style="padding:10px 12px;">${chips || '<span style="color:#94a3b8">—</span>'}</td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <table style="width:100%; border-collapse:collapse; font-size:14px;">
+      <thead class="cb-head">
+        <tr>
+          <th style="text-align:left; padding:10px 12px;">Item</th>
+          <th style="text-align:left; padding:10px 12px;">Required</th>
+          <th style="text-align:left; padding:10px 12px;">Total</th>
+          <th style="text-align:left; padding:10px 12px;">Who</th>
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+    </table>
+  `;
 }
 
 function showEditEventForm() {
@@ -673,80 +1038,67 @@ function renderViewItems() {
   `).join('');
 }
 
-// Modified to group commitments into three sections.
+// ---------- Commitments UI (defaults to 0, supports uncommit, greys out when full) ----------
 async function renderCommitmentForm() {
   const { data: allCommitments } = await supabase
     .from('commitments').select('*').eq('event_id', currentEvent.id);
-  const commitmentTotals = {};
-  const userCommitments = {};
-  (allCommitments || []).forEach((commit) => {
-    commitmentTotals[commit.item_id] = (commitmentTotals[commit.item_id] || 0) + commit.quantity;
-    if (currentUser && commit.user_id === currentUser.id) userCommitments[commit.item_id] = commit.quantity;
+
+  const totals = {};
+  const mine = {};
+  (allCommitments || []).forEach(c => {
+    totals[c.item_id] = (totals[c.item_id] || 0) + Number(c.quantity || 0);
+    if (currentUser && c.user_id === currentUser.id) mine[c.item_id] = Number(c.quantity || 0);
   });
 
-  const committedItems = [];
-  const uncommittedItems = [];
-  const fullyCommittedItems = [];
+  const committed = [];
+  const open = [];
+  const full = [];
 
-  currentEvent.items.forEach((item) => {
-    const totalCommitted = commitmentTotals[item.id] || 0;
-    const yourCommitment = userCommitments[item.id] ?? 0;
-    const remaining = item.quantity_required - totalCommitted;
+  currentEvent.items.forEach(item => {
+    const total = totals[item.id] || 0;
+    const myQty = mine[item.id] ?? 0;
+    const remaining = Math.max(0, item.quantity_required - total);
+
+    // available for others (ignore my current share)
+    const availableForOthers = item.quantity_required - (total - myQty);
+
+    let disabledAttr = '';
+    let btnLabel = myQty > 0 ? 'Update' : 'Commit';
+    if (availableForOthers <= 0 && myQty === 0) {
+      disabledAttr = 'disabled aria-disabled="true" style="opacity:.5;cursor:not-allowed;"';
+    }
+
     const card = `
-      <div class="commitment-card">
-        <strong style="text-align: center; display: block;">${item.item_name}</strong>
+      <div class="commitment-card" style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin:8px 0;background:#fff;">
+        <strong style="display:block;text-align:center;margin-bottom:6px;">${item.item_name}</strong>
         <div>Required: ${item.quantity_required}</div>
-        <div>Total Committed: ${totalCommitted}</div>
-        <div>Your Commitment: ${yourCommitment}</div>
-        <div>
-          <input type="number" id="commit-${item.id}" value="${yourCommitment || 1}" min="1">
-          Remaining: ${remaining}
-          <button onclick="commitItem('${item.id}')">Commit</button>
+        <div>Total Committed: ${total}</div>
+        <div>Your Commitment: ${myQty}</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+          <input type="number" id="commit-${item.id}" value="${String(myQty ?? 0)}" min="0" style="flex:1;"/>
+          <span>Remaining: ${remaining}</span>
+          <button id="commitbtn-${item.id}" ${disabledAttr} onclick="commitItem('${item.id}')">${btnLabel}</button>
         </div>
       </div>
     `;
-    if (yourCommitment > 0) committedItems.push(card);
-    else if (totalCommitted < item.quantity_required) uncommittedItems.push(card);
-    else fullyCommittedItems.push(card);
+
+    if (myQty > 0) committed.push(card);
+    else if (total < item.quantity_required) open.push(card);
+    else full.push(card);
   });
 
+  // --- NEW: extra spacing + horizontal divider between sections
   let html = '';
-  if (committedItems.length) html += "<h4>Items You've Committed To</h4>" + committedItems.join('');
-  if (uncommittedItems.length) html += '<h4>Items Still Open (Under-committed)</h4>' + uncommittedItems.join('');
-  if (fullyCommittedItems.length) html += '<h4>Items Fully Committed</h4>' + fullyCommittedItems.join('');
-  return html;
-}
-
-async function renderCommitmentBreakdown() {
-  const { data: usersData } = await supabase.from('event_users').select('id, username').eq('event_id', currentEvent.id);
-  const userLookup = {};
-  (usersData || []).forEach((u) => { if (u?.id) userLookup[u.id] = u.username || 'Unknown'; });
-
-  const { data: breakdownData, error } = await supabase
-    .from('commitments').select('quantity, item_id, user_id').eq('event_id', currentEvent.id);
-  if (error) return `<p>Error loading commitment breakdown.</p>`;
-
-  const breakdownByItem = {};
-  (breakdownData || []).forEach((row) => {
-    const itemId = row.item_id;
-    const username = row.user_id ? userLookup[row.user_id] || 'Unknown' : 'Unknown';
-    if (!breakdownByItem[itemId]) breakdownByItem[itemId] = { lines: [], total: 0 };
-    breakdownByItem[itemId].lines.push(`${username}: ${row.quantity}`);
-    breakdownByItem[itemId].total += parseInt(row.quantity, 10);
-  });
-
-  let html = '<h4>Commitment Breakdown</h4>';
-  currentEvent.items.forEach((item) => {
-    if (breakdownByItem[item.id]) {
-      let warning = '';
-      if (breakdownByItem[item.id].total > item.quantity_required ||
-          (item.quantity_required == 0 && breakdownByItem[item.id].total > 0)) {
-        warning = ` <span style="color:red;font-weight:bold;">OVERCOMMITTED!</span>`;
-      }
-      html += `<p><strong>${item.item_name}:</strong> ${breakdownByItem[item.id].lines.join(', ')}${warning}</p>`;
-    }
-  });
-  return html;
+  if (committed.length) {
+    html += `<h4 class="commit-sec-title">Items You’ve Committed To</h4>${committed.join('')}`;
+  }
+  if (open.length) {
+    html += `<div class="sec-divider"></div><h4 class="commit-sec-title open">Items Still Open (Under-committed)</h4>${open.join('')}`;
+  }
+  if (full.length) {
+    html += `<div class="sec-divider"></div><h4 class="commit-sec-title full">Items Fully Committed</h4>${full.join('')}`;
+  }
+  return html || '<p>No items yet.</p>';
 }
 
 // ----------------------
@@ -801,29 +1153,45 @@ async function deleteItem(itemId) {
 
 async function commitItem(itemId) {
   const inputEl = document.getElementById(`commit-${itemId}`);
-  const quantity = parseInt(inputEl.value, 10);
-  if (isNaN(quantity) || quantity <= 0) { alert('Please enter a positive integer.'); return; }
+  const raw = inputEl.value.trim();
+  if (raw === '') { alert('Please enter a number (0 or more).'); return; }
+  const quantity = Number(raw);
+  if (!Number.isInteger(quantity) || quantity < 0) { alert('Please enter a non-negative integer.'); return; }
 
-  const { data: itemData, error: itemError } = await supabase
+  // Fetch required + current totals
+  const { data: itemData, error: itemErr } = await supabase
     .from('event_items').select('quantity_required').eq('id', itemId).single();
-  if (itemError || !itemData) { alert(`Error fetching item details: ${itemError?.message}`); return; }
+  if (itemErr || !itemData) { alert(`Error fetching item details: ${itemErr?.message}`); return; }
+  const required = Number(itemData.quantity_required);
 
-  const requiredQuantity = itemData.quantity_required;
-  const { data: commitmentsData } = await supabase.from('commitments').select('quantity').eq('item_id', itemId);
-  const totalCommitted = (commitmentsData || []).reduce((sum, c) => sum + c.quantity, 0);
-
-  const { data: myCommitData } = await supabase
-    .from('commitments').select('quantity').eq('item_id', itemId).eq('user_id', currentUser.id).maybeSingle();
-  const myCurrent = myCommitData ? myCommitData.quantity : 0;
-
-  const available = requiredQuantity - (totalCommitted - myCurrent);
-  if (quantity > available) { alert(`Cannot commit ${quantity}. Only ${available} slots are available.`); return; }
-
-  const { error } = await supabase
+  const { data: all } = await supabase
     .from('commitments')
-    .upsert([{ event_id: currentEvent.id, user_id: currentUser.id, item_id: itemId, quantity }], { onConflict: ['event_id', 'user_id', 'item_id'] });
-  if (error) alert(`Error committing item: ${error.message}`);
-  else loadEvent(currentEvent.slug);
+    .select('user_id, quantity')
+    .eq('item_id', itemId);
+
+  const myCurrent = (all || []).find(r => r.user_id === currentUser.id)?.quantity || 0;
+  const totalOthers = (all || []).reduce((s, r) => s + (r.user_id === currentUser.id ? 0 : Number(r.quantity || 0)), 0);
+
+  if (quantity > (required - totalOthers)) {
+    const available = Math.max(0, required - totalOthers);
+    alert(`Cannot commit ${quantity}. Only ${available} slot(s) available.`);
+    return;
+  }
+
+  if (quantity === 0) {
+    // Uncommit: delete row
+    await supabase.from('commitments')
+      .delete()
+      .eq('event_id', currentEvent.id)
+      .eq('user_id', currentUser.id)
+      .eq('item_id', itemId);
+  } else {
+    await supabase.from('commitments').upsert([
+      { event_id: currentEvent.id, user_id: currentUser.id, item_id: itemId, quantity }
+    ], { onConflict: ['event_id', 'user_id', 'item_id'] });
+  }
+
+  await loadEvent(currentEvent.slug);
 }
 
 // creator-only update handler (kept in sync with location)
@@ -1002,10 +1370,7 @@ function promptForEmailIfRequired() {
   });
 }
 
-
 // NEW: call Supabase Edge Function to send the emails (dashboard invoke)
-// Send reminder emails (creator only) — collects OPTIONAL host message,
-// always adds the server-side disclaimer, and shows clearer errors.
 async function sendReminderEmails() {
   if (currentUser?.username !== currentEvent.created_by) {
     alert('Only the event creator can send reminders.');
@@ -1097,9 +1462,6 @@ async function sendReminderEmails() {
     }
   };
 }
-
-
-
 
 // Expose functions so inline onclick attributes can find them.
 window.updateItem = updateItem;
