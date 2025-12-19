@@ -667,9 +667,10 @@ async function renderEventDashboard() {
   const isCreator = currentUser?.username === currentEvent.created_by;
   const googleMapsUrl = buildGoogleMapsUrl(currentEvent);
 
-  const deletionBanner = (currentEvent.delete_requested_at || currentEvent.marked_for_deletion)
+  // Canonical deletion flag: delete_requested_at (stop using legacy marked_for_deletion in UI)
+  const deletionBanner = currentEvent.delete_requested_at
     ? `<p style="color:#b45309;background:#fffbeb;padding:8px;border:1px solid #f59e0b;border-radius:6px;">
-         This event is scheduled for deletion. New RSVPs and commitments may be disabled.
+         This event is scheduled for deletion. The host can undo deletion for a limited time.
        </p>`
     : '';
 
@@ -692,7 +693,11 @@ async function renderEventDashboard() {
         ${ isCreator ? `
             <button id="editEventBtn" type="button">Edit Event</button>
             ${ currentEvent.collect_real_emails ? `<button id="sendRemindersBtn" type="button">Send Email Reminders</button>` : '' }
-            <button id="deleteEventBtn" type="button" style="background:#fee2e2;color:#7f1d1d;">Delete Event</button>
+            ${
+              currentEvent.delete_requested_at
+                ? `<button id="undeleteEventBtn" type="button" style="background:#dcfce7;color:#14532d;">Undo Delete</button>`
+                : `<button id="deleteEventBtn" type="button" style="background:#fee2e2;color:#7f1d1d;">Delete Event</button>`
+            }
           ` : '' }
       </div>
     </div>
@@ -753,6 +758,7 @@ async function renderEventDashboard() {
     document.getElementById('editEventBtn')?.addEventListener('click', showEditEventForm);
     document.getElementById('sendRemindersBtn')?.addEventListener('click', sendReminderEmails);
     document.getElementById('deleteEventBtn')?.addEventListener('click', confirmDeleteEvent);
+    document.getElementById('undeleteEventBtn')?.addEventListener('click', confirmUndeleteEvent);
   }
 
   document.getElementById('copyShareUrl')?.addEventListener('click', async () => {
@@ -772,11 +778,10 @@ async function renderEventDashboard() {
 }
 
 // ---------- Creator Summary ----------
-// ---------- Creator Summary ----------
 async function renderCreatorSummaryBox() {
   const counts = await getRsvpCounts();
   const breakdownTable = await renderCommitmentBreakdownTable();
-  const yesListHTML = await renderYesList();      // ⬅️ add this
+  const yesListHTML = await renderYesList();
   const declinesHTML = await renderDeclinesList();
 
   return `
@@ -1521,7 +1526,7 @@ async function sendReminderEmails() {
   };
 }
 
-// Creator: mark event for deletion + optional purge
+// Creator: mark event for deletion (soft delete request)
 function confirmDeleteEvent() {
   if (currentUser?.username !== currentEvent.created_by) return;
 
@@ -1543,30 +1548,100 @@ function confirmDeleteEvent() {
   document.getElementById('cancelDelete').onclick = () => overlay.remove();
   document.getElementById('confirmDelete').onclick = async () => {
     const nowIso = new Date().toISOString();
+
     let ok = true;
     let errMsg = '';
-    try {
-      const { error } = await supabase.from('events')
-        .update({ delete_requested_at: nowIso })
-        .eq('id', currentEvent.id);
-      if (error) throw error;
-    } catch (e) {
+
+    // Canonical: set delete_requested_at
+    const { error } = await supabase
+      .from('events')
+      .update({ delete_requested_at: nowIso })
+      .eq('id', currentEvent.id);
+
+    if (error) {
+      ok = false;
+      errMsg = error.message;
+
+      // Optional legacy support (older DBs): try boolean column
       try {
-        const { error } = await supabase.from('events')
+        const { error: legacyErr } = await supabase
+          .from('events')
           .update({ marked_for_deletion: true })
           .eq('id', currentEvent.id);
-        if (error) throw error;
-      } catch (e2) { ok = false; errMsg = e2.message || String(e2); }
+        if (!legacyErr) ok = true;
+      } catch { /* ignore */ }
     }
 
-    if (!ok) { alert('Could not mark event for deletion: ' + errMsg); return; }
+    overlay.remove();
 
-    try { await supabase.functions.invoke('purge-deleted-events', { body: { event_id: currentEvent.id } }); } catch {}
+    if (!ok) {
+      alert('Could not mark event for deletion: ' + errMsg);
+      return;
+    }
+
+    // Critical: do NOT invoke immediate purge here, or Undo will be impossible.
+    alert('Event has been marked for deletion.');
+    await loadEvent(currentEvent.slug);
+  };
+}
+
+// Creator: undo soft deletion request
+function confirmUndeleteEvent() {
+  if (currentUser?.username !== currentEvent.created_by) return;
+
+  const overlay = document.createElement('div');
+  overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:3000;';
+  const box = document.createElement('div');
+  box.style = 'background:#fff;padding:20px;border-radius:10px;max-width:480px;width:92%;';
+  box.innerHTML = `
+    <h3 style="margin:0 0 8px">Undo deletion?</h3>
+    <p style="margin:0 0 10px;color:#444">
+      This will cancel the scheduled deletion and re-enable RSVPs/commitments.
+    </p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button id="cancelUndelete" type="button">Cancel</button>
+      <button id="confirmUndelete" type="button" style="background:#166534;color:#fff;">Undo Delete</button>
+    </div>
+  `;
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  document.getElementById('cancelUndelete').onclick = () => overlay.remove();
+
+  document.getElementById('confirmUndelete').onclick = async () => {
+    let ok = true;
+    let errMsg = '';
+
+    // Canonical: clear delete_requested_at
+    const { error } = await supabase
+      .from('events')
+      .update({ delete_requested_at: null })
+      .eq('id', currentEvent.id);
+
+    if (error) {
+      ok = false;
+      errMsg = error.message;
+    }
+
+    // Optional legacy cleanup (ignore failures)
+    if (ok) {
+      try {
+        await supabase
+          .from('events')
+          .update({ marked_for_deletion: false })
+          .eq('id', currentEvent.id);
+      } catch { /* ignore */ }
+    }
 
     overlay.remove();
-    alert('Event has been marked for deletion.');
-    window.location.hash = '';
-    renderCreateEventForm();
+
+    if (!ok) {
+      alert('Could not undo deletion: ' + errMsg);
+      return;
+    }
+
+    alert('Deletion cancelled.');
+    await loadEvent(currentEvent.slug);
   };
 }
 
