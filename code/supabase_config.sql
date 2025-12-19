@@ -204,7 +204,7 @@ CREATE POLICY IF NOT EXISTS "Event items delete"
   );
 
 -- EVENT_USERS:
--- Keep public SELECT so email->username lookup works pre-auth
+-- Keep public SELECT so email->username lookup works pre-auth (also avoids policy recursion)
 CREATE POLICY IF NOT EXISTS "Event users select"
   ON public.event_users FOR SELECT USING (true);
 
@@ -259,7 +259,7 @@ CREATE POLICY IF NOT EXISTS "Commitments delete"
 -- Additional rules / protections
 -- --------------------------------------------
 
--- Prevent reducing item.required below current commitments (already had)
+-- Prevent reducing item.required below current commitments
 CREATE OR REPLACE FUNCTION public.prevent_reduce_below_commitment()
 RETURNS TRIGGER AS $$
 DECLARE total_committed INT;
@@ -314,7 +314,7 @@ BEFORE INSERT OR UPDATE ON public.commitments
 FOR EACH ROW
 EXECUTE FUNCTION public.enforce_commitment_cap();
 
--- Disallow moving an event_user to another event or renaming their identity (yours)
+-- Disallow moving an event_user to another event or renaming their identity
 CREATE OR REPLACE FUNCTION public.lock_event_users_keys()
 RETURNS trigger AS $f$
 DECLARE original_row public.event_users;
@@ -340,8 +340,8 @@ EXECUTE FUNCTION public.lock_event_users_keys();
 
 -- Force creators to remain RSVP 'yes' (cannot flip to 'no')
 CREATE OR REPLACE FUNCTION public.enforce_creator_yes()
-RETURNS trigger AS $$
-DECLARE is_creator BOOLEAN;
+RETURNS trigger AS $
+$DECLARE is_creator BOOLEAN;
 BEGIN
   SELECT (e.created_by = NEW.username) INTO is_creator
   FROM public.events e
@@ -356,7 +356,7 @@ BEGIN
 
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$ $ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS enforce_creator_yes_ins ON public.event_users;
 DROP TRIGGER IF EXISTS enforce_creator_yes_upd ON public.event_users;
@@ -369,6 +369,60 @@ CREATE TRIGGER enforce_creator_yes_upd
 BEFORE UPDATE ON public.event_users
 FOR EACH ROW
 EXECUTE FUNCTION public.enforce_creator_yes();
+
+-- ============================================================
+-- NEW: Flip a username to RSVP 'yes' for this event, claim row
+--      for auth.uid() (used by the “RSVP Yes” form re-using name)
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.rsvp_yes_claim(
+  p_event_id uuid,
+  p_username text,
+  p_real_email text DEFAULT NULL
+)
+RETURNS public.event_users
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $fn$
+DECLARE
+  v_row public.event_users;
+  v_uid uuid := auth.uid();
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'auth.uid() is null';
+  END IF;
+
+  -- First try to take over an existing row for this username (case-insensitive)
+  UPDATE public.event_users eu
+     SET id              = v_uid,
+         rsvp_status     = 'yes',
+         wants_reminders = true,
+         decline_message = NULL,
+         decline_at      = NULL,
+         real_email      = COALESCE(p_real_email, eu.real_email)
+   WHERE eu.event_id = p_event_id
+     AND lower(eu.username) = lower(p_username)
+  RETURNING * INTO v_row;
+
+  IF NOT FOUND THEN
+    -- Otherwise insert fresh; if exact-case username exists, update it to 'yes'
+    INSERT INTO public.event_users (id, event_id, username, rsvp_status, wants_reminders, real_email)
+    VALUES (v_uid, p_event_id, p_username, 'yes', true, p_real_email)
+    ON CONFLICT (event_id, username) DO UPDATE
+      SET id              = EXCLUDED.id,
+          rsvp_status     = 'yes',
+          wants_reminders = true,
+          decline_message = NULL,
+          decline_at      = NULL,
+          real_email      = COALESCE(EXCLUDED.real_email, public.event_users.real_email)
+    RETURNING * INTO v_row;
+  END IF;
+
+  RETURN v_row;
+END
+$fn$;
+
+GRANT EXECUTE ON FUNCTION public.rsvp_yes_claim(uuid, text, text) TO anon, authenticated;
 
 -- ============================================
 -- Migration-safe addendum (safe to re-run)
@@ -409,7 +463,7 @@ END$$;
 ALTER TABLE public.event_users
   ALTER COLUMN rsvp_status SET DEFAULT 'yes';
 
--- If any legacy values exist, coerce them safely (you said there aren't, but this is safe)
+-- If any legacy values exist, coerce them safely
 UPDATE public.event_users
 SET rsvp_status = 'no'
 WHERE rsvp_status IS NOT NULL AND rsvp_status NOT IN ('yes','no');
