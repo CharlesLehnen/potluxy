@@ -10,22 +10,27 @@ Potluxy is a simple, intuitive web application designed for organizing potlucks 
 4. **Edit Entries**: Optionally, event creators or participants can set a password during sign-up, allowing them to log back into the event and change their entries later.
 
 ## License
-This project is licensed under the BSD 3-Clause License. See the LICENSE file for details.
+Potluxy is **source-available** under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+
+- **Free** for personal, educational, nonprofit, and other noncommercial use: read it, run it, fork it, learn from it.
+- **Commercial use needs a paid license.** That includes companies building event, invitation, or RSVP products,
+  and using this code or the site's content to train or build commercial AI products.
+  Email support@potluxy.com to arrange one.
+
+Versions published before 2026-11-02 were released under the BSD 3-Clause License; those copies keep that license.
 
 ## Citation
-If you use this project in formal or professional settings, please cite it appropriately:
+If you use this project in formal or professional settings, please cite it:
 
-# Example Citation:
-Lehnen, Charles (2024). “Potluxy”. GitHub repository. https://github.com/CharlesLehnen/Potluxy
+Lehnen, Charles (2024). "Potluxy". GitHub repository. https://github.com/CharlesLehnen/Potluxy
 
-# BibTeX:
-```
-@misc{lehnen2023qgiskml,
+```bibtex
+@misc{lehnen2024potluxy,
   author = {Lehnen, Charles},
-  title = {QGIS KML to DJI Pilot 2},
-  year = {2023},
-  howpublished = {\url{https://github.com/CharlesLehnen/QGIS_KML_to_DJI_Pilot_2}}
+  title = {Potluxy: a no-sign-up potluck and group event planner},
+  year = {2024},
+  howpublished = {\url{https://github.com/CharlesLehnen/Potluxy}}
 }
 ```
 
-Feel free to contribute to the project or suggest new features by submitting issues or pull requests. Happy potluck planning!
+Suggestions and bug reports are welcome as GitHub issues. Happy potluck planning!

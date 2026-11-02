@@ -1,0 +1,11 @@
+name: potluxy
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - pip
+  - postgresql>=16  # local test DB for code/migrations (not needed to run the site)
+  - pip:
+    - Pillow>=13.0.0
+    - playwright>=1.48
+    - psycopg[binary]>=3.2

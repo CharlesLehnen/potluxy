@@ -1,44 +1,31 @@
-// style.js
-
-$(document).ready(function () {
-    // one selector to rule them all
-    const focusableSelector = 'input[type="text"], input[type="password"], input[type="date"], input[type="time"], textarea';
-
-    // Input focus/blur effects
-    formInputs.focus(function () {
-        $('#formWrapper').addClass('darken-bg');
-        $('#google_translate_element').css({
-            'background-color': 'rgb(117, 112, 112)',
-            'border-radius': '0',
-            'width': '100vw'
-        });
-        $('h1').css('color', '#44aacc');
+// style.js — header tabs (Plan an event / About). No dependencies.
+// Pre-redesign version (jQuery): archive/2026-11-02_pre_redesign/style.js
+(function () {
+  function showTab(name) {
+    document.querySelectorAll('.tab-button').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.tab === name);
     });
-
-    // handle blur, but only remove the darkening if NOTHING is focused anymore
-    $(document).on('blur', focusableSelector, function () {
-        // check if any matching input is still focused (e.g. user tabbed to the next one)
-        const stillFocused = $(focusableSelector).is(':focus');
-        if (stillFocused) return;
-
-        $('#formWrapper').removeClass('darken-bg');
-        $('#google_translate_element').css({
-            'background-color': 'rgba(255, 255, 255, 0.9)',
-            'border-radius': '0',
-            'width': '100vw'
-        });
-        $('h1').css('color', '#2c3e50');
+    document.querySelectorAll('.tab-content').forEach(function (t) {
+      t.classList.toggle('active', t.id === 'tab-' + name);
     });
+  }
 
-    // Tab switching logic
-$('.tab-button').on('click', function () {
-    const targetTab = $(this).data('tab');
-  
-    $('.tab-button').removeClass('active');
-    $(this).addClass('active');
-  
-    $('.tab-content').removeClass('active');
-    $(`#tab-${targetTab}`).addClass('active');
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.tab-button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        // "Plan an event" from an event page goes back to the create form.
+        if (b.dataset.tab === 'plan' && document.body.classList.contains('is-event') &&
+            document.getElementById('tab-plan').classList.contains('active')) {
+          window.location.hash = '#/';
+        }
+        showTab(b.dataset.tab);
+      });
+    });
+    // Following any link (brand, event link) brings the planner back into view.
+    window.addEventListener('hashchange', function () { showTab('plan'); });
+    // In-app links (brand, My events cards) may point at the page already open, so no hashchange fires.
+    document.addEventListener('click', function (e) {
+      if (e.target.closest && e.target.closest('a[href^="#/"]')) showTab('plan');
+    });
   });
-  
-});
+})();
