@@ -1,4 +1,7 @@
 -- ============================================
+-- NOTE: this is the ORIGINAL schema. Its public table policies are insecure;
+-- after running it, apply every file in code/migrations/ in date order.
+-- ============================================
 -- Potluxy schema (fresh install + migration-safe tail)
 -- YES/NO only; creator always 'yes'
 -- Deletion model:

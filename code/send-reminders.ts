@@ -2,8 +2,9 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? ""; // e.g. reminders@yourdomain.com
 const COOLDOWN_SEC = Number(Deno.env.get("REMINDER_COOLDOWN_SECONDS") ?? "900"); // default 15m
@@ -24,17 +25,29 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const event_id = body?.event_id;
-    if (!event_id) return json({ error: "event_id is required" }, 400);
+    const slug = typeof body?.slug === "string" ? body.slug : "";
+    if (!slug) return json({ error: "slug is required" }, 400);
+
+    // 0) Only the event's host may send. Ask the database as the caller:
+    //    get_event reports me.is_host based on the caller's own session.
+    const asCaller = createClient(SUPABASE_URL, ANON_KEY, {
+      global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+      auth: { persistSession: false }
+    });
+    const { data: callerView, error: viewErr } = await asCaller.rpc("get_event", { p_slug: slug });
+    if (viewErr || !callerView?.me?.is_host) {
+      return json({ error: "Only the host can send reminders." }, 403);
+    }
 
     // 1) Load event
     const { data: event, error: eventErr } = await sb
       .from("events")
       .select("*")
-      .eq("id", event_id)
+      .eq("slug", slug)
       .single();
 
     if (eventErr || !event) return json({ error: "Event not found" }, 404);
+    const event_id = event.id;
 
     // Only send if the host collects real emails (matches your product decision)
     if (!event.collect_real_emails) {

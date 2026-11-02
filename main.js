@@ -1,12 +1,12 @@
-// main.js (Google Maps-only link version + email collection)
-// Import Supabase client and config
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+// main.js — all data access goes through Supabase RPC functions (see code/migrations/).
+// The browser never reads tables directly; the server decides what each caller may see.
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
-// Initialize Supabase client
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-let currentEvent = null;
-let currentUser = null; // Managed via supabase.auth
+
+let slug = null;
+let view = null; // result of get_event: { event, items, going, not_going_count, me, guests? }
 
 // --- tiny styles (spacing/dividers + colored table rows) ---
 (() => {
@@ -21,148 +21,102 @@ let currentUser = null; // Managed via supabase.auth
     .cb-row-full{background:#eef7ee}
     .cb-row-partial{background:#fff8db}
     .cb-row-open{background:#fdecec}
+    .hint{display:block;color:#666;font-size:.8rem;margin-top:.25rem}
+    .err{display:none;color:#b00020;margin:.25rem 0}
+    .linkish{background:none;border:none;color:#0369a1;text-decoration:underline;cursor:pointer;padding:0;font:inherit}
+    .nudge{background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:8px 10px;font-size:.9rem;margin:10px 0}
   `;
   document.head.appendChild(s);
 })();
 
+// ----------------------
 // Helpers
-function setText(id, msg) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = msg || '';
+// ----------------------
+function esc(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
-function show(el) { el && (el.style.display = 'block'); }
-function hide(el) { el && (el.style.display = 'none'); }
+function $(id) { return document.getElementById(id); }
+function showErr(id, msg) { const el = $(id); if (!el) return; el.textContent = msg || ''; el.style.display = msg ? 'block' : 'none'; }
+function errMsg(e) { return e?.message || String(e); }
 
-// allow spaces; store as underscores; allow letters, numbers, underscores, dashes, periods
-function sanitizeUsername(raw) {
-  if (!raw) return '';
-  const withUnderscores = raw.trim().replace(/\s+/g, '_');
-  return withUnderscores.replace(/[^a-zA-Z0-9._-]/g, '_');
-}
-function validateUsername(raw) {
-  if (!raw || raw.trim().length < 2) return 'Please enter a name or username (2+ characters).';
-  return null;
-}
-function constructEmail(username, slug) {
-  return `${username}.${slug}@mailinator.com`;
+async function rpc(fn, args) {
+  const { data, error } = await supabase.rpc(fn, args);
+  if (error) throw new Error(error.message);
+  if (data && typeof data === 'object' && data.error) throw new Error(data.error);
+  return data;
 }
 
-// RSVP counts (fallback to rsvps table if present for "no")
-async function getRsvpCounts() {
-  const c = { yes: 0, no: 0 };
-
-  const { data: eu, error: euErr } = await supabase
-    .from('event_users')
-    .select('rsvp_status')
-    .eq('event_id', currentEvent.id);
-
-  if (!euErr && Array.isArray(eu)) {
-    eu.forEach(r => {
-      if (r.rsvp_status === 'yes') c.yes++;
-      else if (r.rsvp_status === 'no') c.no++;
-    });
+// Every visitor gets a private anonymous session; it is their identity in this browser.
+async function ensureSession() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session) return true;
+  const { error } = await supabase.auth.signInAnonymously();
+  if (error) {
+    console.error('[auth] anonymous sign-in failed:', error);
+    return false;
   }
-
-  try {
-    const { data: rs } = await supabase
-      .from('rsvps')
-      .select('status')
-      .eq('event_id', currentEvent.id);
-    if (Array.isArray(rs)) c.no += rs.filter(r => r.status === 'no').length;
-  } catch { /* optional */ }
-
-  return c;
+  return true;
 }
 
-
-// If there is a pre-existing anonymous RSVP "no" row for this username,
-// reassign it to the logged-in user's id so we can flip to "yes" cleanly.
-// Works under your eu_upsert_no policy (no secrets needed).
-async function mergeAnonNoToUserId(userId, username) {
-  await supabase
-    .from('event_users')
-    .update({ id: userId }) // re-key to the authenticated user
-    .eq('event_id', currentEvent.id)
-    .eq('username', username)
-    .eq('rsvp_status', 'no')
-    .eq('wants_reminders', false);
-}
-
+function eventUrl(s = slug) { return `${location.origin}/#/event/${s}`; }
 
 // -----------------------------------------------------------------------------
 // OpenStreetMap / Nominatim helpers (no API key needed)
 // -----------------------------------------------------------------------------
 async function osmSearch(query) {
   if (!query || query.length < 3) return [];
-  const params = new URLSearchParams({
-    q: query,
-    format: 'json',
-    addressdetails: 1,
-    limit: 5
-  });
-  const res = await fetch(
-    `https://nominatim.openstreetmap.org/search?${params.toString()}`,
-    { headers: { 'Accept-Language': 'en' } }
-  );
+  const params = new URLSearchParams({ q: query, format: 'json', addressdetails: 1, limit: 5 });
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, { headers: { 'Accept-Language': 'en' } });
   if (!res.ok) return [];
   return await res.json();
 }
 
 function attachOSMAutocomplete(inputEl, onSelect) {
   if (!inputEl) return;
-
   const dropdown = document.createElement('div');
-  dropdown.style.position = 'absolute';
-  dropdown.style.background = '#fff';
-  dropdown.style.border = '1px solid #ccc';
-  dropdown.style.zIndex = 1500;
-  dropdown.style.width = inputEl.offsetWidth + 'px';
-  dropdown.style.maxHeight = '180px';
-  dropdown.style.overflowY = 'auto';
-  dropdown.style.display = 'none';
-
+  Object.assign(dropdown.style, {
+    position: 'absolute', background: '#fff', border: '1px solid #ccc', zIndex: 1500,
+    width: inputEl.offsetWidth + 'px', maxHeight: '180px', overflowY: 'auto', display: 'none'
+  });
   const wrapper = document.createElement('div');
   wrapper.style.position = 'relative';
   inputEl.parentNode.insertBefore(wrapper, inputEl);
   wrapper.appendChild(inputEl);
   wrapper.appendChild(dropdown);
 
-  inputEl.addEventListener('input', async () => {
-    const q = inputEl.value.trim();
-    if (q.length < 3) { dropdown.style.display = 'none'; return; }
-    const results = await osmSearch(q);
-    dropdown.innerHTML = '';
-    if (!results.length) { dropdown.style.display = 'none'; return; }
-
-    results.forEach((r) => {
-      const item = document.createElement('div');
-      item.textContent = r.display_name;
-      item.style.padding = '6px 8px';
-      item.style.cursor = 'pointer';
-      item.addEventListener('click', () => {
-        inputEl.value = r.display_name;
-        dropdown.style.display = 'none';
-        onSelect && onSelect(r);
+  let timer;
+  inputEl.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const q = inputEl.value.trim();
+      if (q.length < 3) { dropdown.style.display = 'none'; return; }
+      const results = await osmSearch(q);
+      dropdown.innerHTML = '';
+      if (!results.length) { dropdown.style.display = 'none'; return; }
+      results.forEach((r) => {
+        const item = document.createElement('div');
+        item.textContent = r.display_name;
+        Object.assign(item.style, { padding: '6px 8px', cursor: 'pointer' });
+        item.addEventListener('click', () => {
+          inputEl.value = r.display_name;
+          dropdown.style.display = 'none';
+          onSelect && onSelect(r);
+        });
+        item.addEventListener('mouseenter', () => { item.style.background = '#eee'; });
+        item.addEventListener('mouseleave', () => { item.style.background = '#fff'; });
+        dropdown.appendChild(item);
       });
-      item.addEventListener('mouseenter', () => { item.style.background = '#eee'; });
-      item.addEventListener('mouseleave', () => { item.style.background = '#fff'; });
-      dropdown.appendChild(item);
-    });
-
-    dropdown.style.display = 'block';
+      dropdown.style.display = 'block';
+    }, 350);
   });
-
-  document.addEventListener('click', (e) => {
-    if (!wrapper.contains(e.target)) dropdown.style.display = 'none';
-  });
+  document.addEventListener('click', (e) => { if (!wrapper.contains(e.target)) dropdown.style.display = 'none'; });
 }
 
 function buildGoogleMapsUrl(evt) {
-  const hasCoords = evt.event_lat && evt.event_lng;
-  if (hasCoords) return `https://www.google.com/maps/search/?api=1&query=${evt.event_lat},${evt.event_lng}`;
-  if (evt.event_location) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(evt.event_location)}`;
-  }
+  if (evt.lat != null && evt.lng != null) return `https://www.google.com/maps/search/?api=1&query=${Number(evt.lat)},${Number(evt.lng)}`;
+  if (evt.location) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(evt.location)}`;
   return null;
 }
 
@@ -174,1144 +128,695 @@ function formatEventTime(t) {
   return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
+const PASSWORD_HINT = 'Optional. Without a password you can only make changes from this browser.';
+
 // ----------------------
-// 1. Event Creation (for creators)
+// 1. Event creation
 // ----------------------
-async function renderCreateEventForm() {
-  const app = document.getElementById('app');
-  app.innerHTML = `
+function renderCreateEventForm() {
+  slug = null; view = null;
+  $('app').innerHTML = `
     <form id="eventForm" class="form">
       <h2>Create New Event</h2>
-      <div id="eventFormError" style="display:none;color:#b00020;margin:.25rem 0;"></div>
+      <div id="eventFormError" class="err"></div>
       <br>
-
       <label for="eventName">Event Name:</label>
-      <input type="text" id="eventName" required>
-      <small style="display:block;color:#666;margin-top:.25rem;">No emojis</small>
+      <input type="text" id="eventName" maxlength="120" required>
       <br><br>
-
       <label for="eventDescription">Event Description (optional):</label>
-      <textarea id="eventDescription" placeholder="Enter a description..."></textarea>
-      <small style="display:block;color:#666;margin-top:.25rem;">No emojis</small>
+      <textarea id="eventDescription" maxlength="2000" placeholder="Enter a description..."></textarea>
       <br><br>
-
       <label for="eventDate">Event Date (optional):</label>
       <input type="date" id="eventDate">
       <br><br>
-
       <label for="eventTime">Event Time (optional):</label>
       <input type="time" id="eventTime">
       <br><br>
-
       <label for="eventLocation">Event Location (optional):</label>
-      <input type="text" id="eventLocation" placeholder="Search by typing an address...">
+      <input type="text" id="eventLocation" maxlength="300" placeholder="Search by typing an address...">
       <input type="hidden" id="eventLocationPlaceId">
       <input type="hidden" id="eventLocationLat">
       <input type="hidden" id="eventLocationLng">
       <br><br>
-
       <label style="display:flex;gap:.5rem;align-items:center;">
         <input type="checkbox" id="collectEmails">
         Collect attendee emails for reminders (optional)
       </label>
-      <p style="font-size:.8rem;color:#666;margin-top:.3rem;">If checked, people joining this event will be required to provide an email.</p>
+      <p style="font-size:.8rem;color:#666;margin-top:.3rem;">If checked, guests who RSVP yes must enter an email. Only you can see it.</p>
       <br>
-
       <label for="username">Your Name:</label>
-      <input type="text" id="username" required placeholder="e.g., Jane Doe">
-      <small style="display:block;color:#666;margin-top:.25rem;"></small>
+      <input type="text" id="username" maxlength="40" required placeholder="e.g., Jane Doe">
       <br><br>
-
-      <label for="password">Password (optional for editing):</label>
-      <input type="password" id="password">
-      <br><br>
-
+      <label for="password">Password:</label>
+      <input type="password" id="password" maxlength="72" autocomplete="new-password">
+      <small class="hint">${PASSWORD_HINT}</small>
+      <br>
       <button id="createEventBtn" type="submit">Create Event</button>
     </form>
   `;
-  document.getElementById('eventForm').addEventListener('submit', createEvent);
-
-  const locInput = document.getElementById('eventLocation');
-  attachOSMAutocomplete(locInput, (place) => {
-    document.getElementById('eventLocationPlaceId').value = place.osm_id ? `osm:${place.osm_type}:${place.osm_id}` : '';
-    document.getElementById('eventLocationLat').value = place.lat || '';
-    document.getElementById('eventLocationLng').value = place.lon || '';
+  $('eventForm').addEventListener('submit', createEvent);
+  attachOSMAutocomplete($('eventLocation'), (place) => {
+    $('eventLocationPlaceId').value = place.osm_id ? `osm:${place.osm_type}:${place.osm_id}` : '';
+    $('eventLocationLat').value = place.lat || '';
+    $('eventLocationLng').value = place.lon || '';
   });
-}
-
-function generateSlug(eventName) {
-  const uniqueId = Math.random().toString(36).substring(2, 10);
-  return eventName.toLowerCase().trim().replace(/\s+/g, '-') + '-' + uniqueId;
 }
 
 async function createEvent(e) {
   e.preventDefault();
-  const errBox = document.getElementById('eventFormError');
-  setText('eventFormError', ''); hide(errBox);
-  const btn = document.getElementById('createEventBtn');
+  showErr('eventFormError', '');
+  const btn = $('createEventBtn');
   btn.disabled = true;
-
   try {
-    const eventName = document.getElementById('eventName').value.trim();
-    const eventDescription = document.getElementById('eventDescription').value.trim();
-    const eventDate = document.getElementById('eventDate').value;
-    const eventTime = document.getElementById('eventTime').value;
-    const eventLocation = document.getElementById('eventLocation').value.trim();
-    const eventLocationPlaceId = document.getElementById('eventLocationPlaceId').value.trim();
-    const eventLocationLat = document.getElementById('eventLocationLat').value.trim();
-    const eventLocationLng = document.getElementById('eventLocationLng').value.trim();
-    const collectEmails = document.getElementById('collectEmails').checked;
-    const rawUsername = document.getElementById('username').value;
-    const password = document.getElementById('password').value.trim();
-
-    const usernameErr = validateUsername(rawUsername);
-    if (usernameErr) { setText('eventFormError', usernameErr); show(errBox); btn.disabled = false; return; }
-
-    if (!eventName) { setText('eventFormError', 'Event name is required.'); show(errBox); btn.disabled = false; return; }
-
-    const cleanUsername = sanitizeUsername(rawUsername);
-    const slug = generateSlug(eventName);
-    const email = constructEmail(cleanUsername, slug);
-    const pwd = password || 'no-password';
-
-    const { error: signUpError } = await supabase.auth.signUp({ email, password: pwd });
-    if (signUpError && !/already|registered/i.test(signUpError.message)) {
-      setText('eventFormError', `Sign up failed: ${signUpError.message}`);
-      show(errBox); btn.disabled = false; return;
-    }
-
-    const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password: pwd });
-    if (signInErr) {
-      setText('eventFormError', `Sign in failed: ${signInErr.message}. If your Supabase project requires email confirmations, disable them for this flow or use a server-side admin create.`);
-      show(errBox); btn.disabled = false; return;
-    }
-
-    const { data: sessionData } = await supabase.auth.getSession();
-    if (!sessionData?.session) {
-      setText('eventFormError', 'Could not establish a session after sign-in. Check Supabase Auth settings.');
-      show(errBox); btn.disabled = false; return;
-    }
-    const userId = sessionData.session.user.id;
-
-    const { data: eventData, error: eventError } = await supabase
-      .from('events')
-      .insert([{
-        event_name: eventName,
-        slug,
-        created_by: cleanUsername,
-        event_description: eventDescription || null,
-        event_date: eventDate || null,
-        event_time: eventTime || null,
-        event_location: eventLocation || null,
-        event_place_id: eventLocationPlaceId || null,
-        event_lat: eventLocationLat ? Number(eventLocationLat) : null,
-        event_lng: eventLocationLng ? Number(eventLocationLng) : null,
-        collect_real_emails: collectEmails
-      }])
-      .select().single();
-
-    if (eventError) {
-      setText('eventFormError', `Error creating event: ${eventError.message}`);
-      show(errBox); btn.disabled = false; return;
-    }
-
-    const eventId = eventData.id;
-
-    const { data: profileData, error: profileError } = await supabase
-      .from('event_users')
-      .insert([{ id: userId, event_id: eventId, username: cleanUsername }])
-      .select().single();
-    if (profileError) {
-      setText('eventFormError', `Error creating event user: ${profileError.message}`);
-      show(errBox); btn.disabled = false; return;
-    }
-
-    currentUser = profileData;
-    window.location.hash = `#/event/${slug}`;
-    await loadEvent(slug);
+    if (!(await ensureSession())) throw new Error('Could not start a browser session. Please refresh and try again.');
+    const res = await rpc('create_event', {
+      p: {
+        name: $('eventName').value,
+        description: $('eventDescription').value,
+        date: $('eventDate').value,
+        time: $('eventTime').value,
+        location: $('eventLocation').value,
+        place_id: $('eventLocationPlaceId').value,
+        lat: $('eventLocationLat').value,
+        lng: $('eventLocationLng').value,
+        collect_emails: $('collectEmails').checked,
+        host_name: $('username').value,
+        password: $('password').value
+      }
+    });
+    window.location.hash = `#/event/${res.slug}`;
   } catch (err) {
-    setText('eventFormError', String(err));
-    show(errBox);
+    showErr('eventFormError', errMsg(err));
   } finally {
     btn.disabled = false;
   }
 }
 
 // ----------------------
-// 2. Event Loading & Login (Per Event)
+// 2. Loading an event
 // ----------------------
-async function loadEvent(slug) {
-  const { data: eventData, error: eventError } = await supabase
-    .from('events')
-    .select('*, event_items(*)')
-    .eq('slug', slug)
-    .single();
-  if (eventError || !eventData) {
-    console.error('Event not found.');
+async function loadEvent(s) {
+  slug = s;
+  await ensureSession();
+  try {
+    view = await rpc('get_event', { p_slug: s });
+  } catch (err) {
+    console.error('Event not found:', err);
     renderCreateEventForm();
+    showErr('eventFormError', 'That event link was not found. You can create a new event below.');
     return;
   }
-  currentEvent = eventData;
-  currentEvent.items = eventData.event_items || [];
+  render();
+}
 
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) {
-    renderLoginForm(slug);
-  } else {
-    const { data: profileData } = await supabase
-      .from('event_users')
-      .select('*')
-      .eq('id', session.user.id)
-      .eq('event_id', currentEvent.id)
-      .maybeSingle();
-    if (!profileData) {
-      renderLoginForm(slug);
-    } else {
-      currentUser = profileData;
-      renderEventDashboard();
-    }
-  }
+function render() {
+  if (view.me) renderEventDashboard();
+  else renderRespondPanel();
+}
+
+// Apply a server result (fresh get_event payload) and redraw.
+function apply(result) { view = result; render(); }
+
+function eventInfoHTML() {
+  const ev = view.event;
+  const mapsUrl = buildGoogleMapsUrl(ev);
+  return `
+    ${ev.description ? `<p class="event-description">${esc(ev.description)}</p>` : ''}
+    ${ev.date ? `<p class="event-date">Date: ${esc(ev.date)}</p>` : ''}
+    ${ev.time ? `<p class="event-time">Time: ${esc(formatEventTime(ev.time))}</p>` : ''}
+    ${ev.location ? `<p class="event-location">Location: ${esc(ev.location)}
+        ${mapsUrl ? `(<a href="${esc(mapsUrl)}" target="_blank" rel="noopener noreferrer">open in Google Maps</a>)` : ''}</p>` : ''}
+    <p class="event-host">Hosted by ${esc(view.event.host)} · ${view.going.length} going</p>
+  `;
 }
 
 // ----------------------
-// 2a) Recipient RSVP panel (no pop-ups)
+// 2a) Not yet responded
 // ----------------------
-function renderLoginForm(slug) {
-  const requiresEmail = !!currentEvent.collect_real_emails;
-  const googleMapsUrl = buildGoogleMapsUrl(currentEvent);
+function renderRespondPanel() {
+  const ev = view.event;
+  const requiresEmail = !!ev.collect_emails;
+  const closed = ev.deleting;
 
-  const app = document.getElementById('app');
-  app.innerHTML = `
-    <h2 class="event-title">${currentEvent.event_name}</h2>
+  $('app').innerHTML = `
+    <h2 class="event-title">${esc(ev.name)}</h2>
+    <div class="event-info">${eventInfoHTML()}</div>
 
-    <div class="event-info">
-      ${currentEvent.event_description ? `<p class="event-description">${currentEvent.event_description}</p>` : ''}
-      ${currentEvent.event_date ? `<p class="event-date">Date: ${currentEvent.event_date}</p>` : ''}
-      ${currentEvent.event_time ? `<p class="event-time">Time: ${formatEventTime(currentEvent.event_time)}</p>` : ''}
-      ${
-        currentEvent.event_location
-          ? `<p class="event-location">
-               Location: ${currentEvent.event_location}
-               ${googleMapsUrl ? `(<a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer">open in Google Maps</a>)` : ''}
-             </p>`
-          : ''
-      }
-    </div>
-
+    ${closed ? `<p class="nudge">This event is scheduled for deletion and no longer accepts responses.</p>` : `
     <div class="form">
       <h3 style="text-align:center">How would you like to respond?</h3>
-      <div style="display:flex;gap:8px;justify-content:center;margin-top:10px;">
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap;">
         <button id="chooseYes" type="button">RSVP Yes</button>
         <button id="chooseNo" type="button">RSVP No</button>
-        <button id="chooseAlready" type="button">I already RSVP'd</button>
+        <button id="chooseAlready" type="button">I already responded</button>
       </div>
-      <p style="text-align:center;color:#666;font-size:.85rem;margin-top:8px;">
-        Email will only be required if the host enabled it for this event.
-      </p>
     </div>
 
-    <!-- YES -->
     <form id="rsvpYesForm" class="form" style="display:none;">
-      <div id="yesErr" style="display:none;color:#b00020;margin:.25rem 0;"></div>
+      <div id="yesErr" class="err"></div>
       <label for="yesName">Name</label>
-      <input type="text" id="yesName" placeholder="e.g., Jane Doe" required>
-      ${
-        requiresEmail
-          ? `
-            <label for="yesEmail">Email (required)</label>
-            <input type="email" id="yesEmail" placeholder="you@example.com" required>
-            <p style="font-size:.8rem;color:#666;">The host required email for reminders.</p>
-            `
-          : ''
-      }
-      <label for="yesPwd">Create a password (optional)</label>
-      <input type="password" id="yesPwd" placeholder="Set one if you want to sign back in">
-
+      <input type="text" id="yesName" maxlength="40" placeholder="e.g., Jane Doe" required>
+      ${requiresEmail ? `
+        <label for="yesEmail">Email (required)</label>
+        <input type="email" id="yesEmail" maxlength="254" placeholder="you@example.com" required>
+        <small class="hint">The host asked for emails to send reminders. Only the host can see it.</small>` : ''}
+      <label for="yesPwd">Password</label>
+      <input type="password" id="yesPwd" maxlength="72" autocomplete="new-password">
+      <small class="hint">${PASSWORD_HINT}</small>
       <button type="submit">Join Event</button>
     </form>
 
-    <!-- NO -->
     <form id="rsvpNoForm" class="form" style="display:none;">
-      <div id="noErr" style="display:none;color:#b00020;margin:.25rem 0;"></div>
+      <div id="noErr" class="err"></div>
       <label for="noName">Name</label>
-      <input type="text" id="noName" placeholder="e.g., Sam" required>
-      <label for="noMsg">Message to host (optional)</label>
-      <textarea id="noMsg" placeholder="So sorry—out of town."></textarea>
+      <input type="text" id="noName" maxlength="40" placeholder="e.g., Sam" required>
+      <label for="noMsg">Message to host (optional, only the host sees it)</label>
+      <textarea id="noMsg" maxlength="280" placeholder="So sorry, out of town."></textarea>
       <button type="submit" class="login">Send</button>
-      <p style="font-size:.85rem;color:#666;margin-top:6px;">Thanks — we’ll let the host know.</p>
     </form>
 
-    <!-- ALREADY -->
     <form id="loginForm" class="form" style="display:none;">
-      <div id="loginError" style="display:none;color:#b00020;margin:.25rem 0;"></div>
+      <div id="loginError" class="err"></div>
       <label for="loginIdent">Name or Email</label>
       <input type="text" id="loginIdent" placeholder="Name or Email" required>
       <label for="loginPwd">Password</label>
-      <input type="password" id="loginPwd" required>
-      <button type="submit" class="login">Log In</button>
-    </form>
+      <input type="password" id="loginPwd" autocomplete="current-password" required>
+      <small class="hint">Responded without a password? Open this link in the browser you used then.</small>
+      <button type="submit" class="login">Sign In</button>
+    </form>`}
+
+    <div class="items" style="margin-top:16px;">
+      <h3>Items Needed</h3>
+      ${renderViewItems()}
+    </div>
   `;
+  if (closed) return;
 
-  const yesForm = document.getElementById('rsvpYesForm');
-  const noForm = document.getElementById('rsvpNoForm');
-  const alreadyForm = document.getElementById('loginForm');
-  document.getElementById('chooseYes').onclick = () => { yesForm.style.display='block'; noForm.style.display='none'; alreadyForm.style.display='none'; };
-  document.getElementById('chooseNo').onclick = () => { yesForm.style.display='none'; noForm.style.display='block'; alreadyForm.style.display='none'; };
-  document.getElementById('chooseAlready').onclick = () => { yesForm.style.display='none'; noForm.style.display='none'; alreadyForm.style.display='block'; };
-
-  yesForm.addEventListener('submit', (e) => handleRsvpYes(e, slug));
-  noForm.addEventListener('submit', handleRsvpNo);
-  alreadyForm.addEventListener('submit', handleReturningLogin);
-}
-
-// ----------------------
-// 2b) RSVP handlers
-// ----------------------
-async function handleRsvpYes(e, slug) {
-  e.preventDefault();
-  const errBox = document.getElementById('yesErr'); setText('yesErr',''); hide(errBox);
-
-  const rawName = document.getElementById('yesName').value.trim();
-  const password = document.getElementById('yesPwd').value.trim();
-  const requiresEmail = !!currentEvent.collect_real_emails;
-  const realEmail = requiresEmail ? document.getElementById('yesEmail').value.trim() : '';
-
-  const nameErr = validateUsername(rawName);
-  if (nameErr) { setText('yesErr', nameErr); show(errBox); return; }
-  if (requiresEmail && !realEmail) { setText('yesErr', 'Email is required for this event.'); show(errBox); return; }
-
-  const cleanUsername = sanitizeUsername(rawName);
-  const aliasEmail = constructEmail(cleanUsername, slug);
-  const pwd = password || 'no-password';
-
-  // 1) Sign in (or soft sign-up) with constructed alias email
-  let { error: signInErr } = await supabase.auth.signInWithPassword({ email: aliasEmail, password: pwd });
-  if (signInErr) {
-    const { error: signUpErr } = await supabase.auth.signUp({ email: aliasEmail, password: pwd });
-    if (signUpErr && !/already|registered/i.test(signUpErr.message)) {
-      setText('yesErr', `Sign up failed: ${signUpErr.message}`); show(errBox); return;
-    }
-    const { error: signInErr2 } = await supabase.auth.signInWithPassword({ email: aliasEmail, password: pwd });
-    if (signInErr2) { setText('yesErr', `Sign in failed: ${signInErr2.message}`); show(errBox); return; }
-  }
-
-  const { data: sessionData } = await supabase.auth.getSession();
-  if (!sessionData?.session) { setText('yesErr', 'Could not establish a session.'); show(errBox); return; }
-
-  // 2) Claim/flip the username to RSVP 'yes' (handles existing "no" rows)
-  const { data: claimed, error: claimErr } = await supabase.rpc('rsvp_yes_claim', {
-    p_event_id: currentEvent.id,
-    p_username: cleanUsername,
-    p_real_email: requiresEmail ? realEmail : null
+  const forms = { chooseYes: 'rsvpYesForm', chooseNo: 'rsvpNoForm', chooseAlready: 'loginForm' };
+  Object.entries(forms).forEach(([btnId, formId]) => {
+    $(btnId).onclick = () => {
+      Object.values(forms).forEach((f) => { $(f).style.display = f === formId ? 'block' : 'none'; });
+      $(formId).querySelector('input')?.focus();
+    };
   });
-
-  if (claimErr) { setText('yesErr', `Could not set RSVP: ${claimErr.message}`); show(errBox); return; }
-  if (!claimed) { setText('yesErr', 'Unexpected: claim returned no row.'); show(errBox); return; }
-
-  // 3) Local state → yes; go to dashboard
-  currentUser = claimed;
-  renderEventDashboard();
+  $('rsvpYesForm').addEventListener('submit', handleRsvpYes);
+  $('rsvpNoForm').addEventListener('submit', handleRsvpNo);
+  $('loginForm').addEventListener('submit', handleSignIn);
 }
 
-async function handleRsvpNo(e) {
-  e.preventDefault();
-  const errBox = document.getElementById('noErr'); setText('noErr',''); hide(errBox);
-
-  const rawName = document.getElementById('noName').value.trim();
-  const nameErr = validateUsername(rawName);
-  if (nameErr) { setText('noErr', nameErr); show(errBox); return; }
-  const cleanUsername = sanitizeUsername(rawName);
-
-  const rawMsg = (document.getElementById('noMsg').value || '').trim();
-  const message = rawMsg.slice(0, 280);
-
-  const { data: existing } = await supabase
-    .from('event_users')
-    .select('id')
-    .eq('event_id', currentEvent.id)
-    .eq('username', cleanUsername)
-    .maybeSingle();
-
-  const nowIso = new Date().toISOString();
-
-  try {
-    if (existing?.id) {
-      await supabase.from('event_users').update({
-        rsvp_status: 'no',
-        wants_reminders: false,
-        decline_message: message || null,
-        decline_at: nowIso
-      }).eq('id', existing.id);
-    } else {
-      const id = (crypto && crypto.randomUUID) ? crypto.randomUUID() : 'decline_' + Math.random().toString(36).slice(2);
-      await supabase.from('event_users').insert([{
-        id,
-        event_id: currentEvent.id,
-        username: cleanUsername,
-        rsvp_status: 'no',
-        wants_reminders: false,
-        decline_message: message || null,
-        decline_at: nowIso
-      }]);
-    }
-  } catch (error) {
-    const msg = String(error?.message || '');
-    if (msg.includes('column') || error?.code === '42703') {
-      if (existing?.id) {
-        await supabase.from('event_users').update({
-          rsvp_status: 'no',
-          wants_reminders: false
-        }).eq('id', existing.id);
-      } else {
-        const id = (crypto && crypto.randomUUID) ? crypto.randomUUID() : 'decline_' + Math.random().toString(36).slice(2);
-        await supabase.from('event_users').insert([{
-          id,
-          event_id: currentEvent.id,
-          username: cleanUsername,
-          rsvp_status: 'no',
-          wants_reminders: false
-        }]);
-      }
-    } else {
-      setText('noErr', `Could not record decline: ${error.message || 'Unknown error'}`); show(errBox); return;
-    }
-  }
-
-  // BEST-EFFORT fallback table
-  try {
-    await supabase.from('rsvps').upsert(
-      [{ event_id: currentEvent.id, username: cleanUsername, status: 'no', message, created_at: nowIso }],
-      { onConflict: ['event_id','username','status'] }
-    );
-  } catch {}
-
-  // If viewer is signed in for this event, flip them to "no" AND remove commitments
-  const { data: sessionData } = await supabase.auth.getSession();
-  const userId = sessionData?.session?.user?.id;
-  if (userId) {
-    try {
-      await supabase.from('event_users').update({
-        rsvp_status: 'no',
-        wants_reminders: false,
-        decline_message: message || null,
-        decline_at: nowIso
-      }).eq('id', userId).eq('event_id', currentEvent.id);
-    } catch {
-      await supabase.from('event_users').update({
-        rsvp_status: 'no',
-        wants_reminders: false
-      }).eq('id', userId).eq('event_id', currentEvent.id);
-    }
-    // delete commitments for this user
-    try {
-      await supabase.from('commitments').delete()
-        .eq('event_id', currentEvent.id)
-        .eq('user_id', userId);
-    } catch {}
-  }
-
-  const noForm = document.getElementById('rsvpNoForm');
-  if (noForm) noForm.innerHTML = `<p style="color:#1b5e20;">Thanks — we’ve let the host know you can’t make it.</p>`;
+async function submitWith(form, errId, fn) {
+  const btn = form.querySelector('button[type="submit"]');
+  showErr(errId, '');
+  btn.disabled = true;
+  try { apply(await fn()); }
+  catch (err) { showErr(errId, errMsg(err)); }
+  finally { btn.disabled = false; }
 }
 
-async function handleReturningLogin(e) {
+function handleRsvpYes(e) {
   e.preventDefault();
-  const errBox = document.getElementById('loginError'); setText('loginError',''); hide(errBox);
+  submitWith(e.target, 'yesErr', () => rpc('join_event', {
+    p_slug: slug,
+    p: { name: $('yesName').value, email: $('yesEmail')?.value || '', password: $('yesPwd').value, rsvp: 'yes' }
+  }));
+}
 
-  const identifier = document.getElementById('loginIdent').value.trim();
-  const password = document.getElementById('loginPwd').value.trim();
-  if (!identifier) { setText('loginError', 'Enter your name or email.'); show(errBox); return; }
-  if (!password) { setText('loginError', 'Please enter your password.'); show(errBox); return; }
+function handleRsvpNo(e) {
+  e.preventDefault();
+  submitWith(e.target, 'noErr', () => rpc('join_event', {
+    p_slug: slug,
+    p: { name: $('noName').value, rsvp: 'no', message: $('noMsg').value }
+  }));
+}
 
-  let aliasEmail;
-  if (/@/.test(identifier)) {
-    const { data: row } = await supabase
-      .from('event_users')
-      .select('username')
-      .eq('event_id', currentEvent.id)
-      .ilike('real_email', identifier)
-      .maybeSingle();
-    if (!row?.username) { setText('loginError', 'No attendee found with that email.'); show(errBox); return; }
-    const cleanUsername = sanitizeUsername(row.username);
-    aliasEmail = constructEmail(cleanUsername, currentEvent.slug);
-  } else {
-    const cleanUsername = sanitizeUsername(identifier);
-    const ve = validateUsername(cleanUsername);
-    if (ve) { setText('loginError', ve); show(errBox); return; }
-    aliasEmail = constructEmail(cleanUsername, currentEvent.slug);
-  }
-
-  const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({ email: aliasEmail, password });
-  if (signInErr) { setText('loginError', `Sign in failed: ${signInErr.message}`); show(errBox); return; }
-
-  const userId = signInData.session.user.id;
-  const { data: existingProfile } = await supabase
-    .from('event_users').select('*').eq('id', userId).eq('event_id', currentEvent.id).maybeSingle();
-  if (!existingProfile) {
-    const aliasUsername = aliasEmail.split('@')[0].split('.')[0];
-    await supabase.from('event_users').insert([{ id: userId, event_id: currentEvent.id, username: aliasUsername }]);
-  }
-
-  const { data: profile } = await supabase
-    .from('event_users').select('*').eq('id', userId).eq('event_id', currentEvent.id).maybeSingle();
-
-  currentUser = profile || null;
-  renderEventDashboard();
+function handleSignIn(e) {
+  e.preventDefault();
+  submitWith(e.target, 'loginError', () => rpc('sign_in', {
+    p_slug: slug, p_ident: $('loginIdent').value, p_password: $('loginPwd').value
+  }));
 }
 
 // ----------------------
-// 3. Event Dashboard & Detailed Commitment Display
+// 3. Dashboard (responded)
 // ----------------------
-async function renderEventDashboard() {
-  const app = document.getElementById('app');
-  const isCreator = currentUser?.username === currentEvent.created_by;
-  const googleMapsUrl = buildGoogleMapsUrl(currentEvent);
+function renderEventDashboard() {
+  const ev = view.event;
+  const me = view.me;
+  const isHost = me.is_host;
 
-  // Canonical deletion flag: delete_requested_at (stop using legacy marked_for_deletion in UI)
-  const deletionBanner = currentEvent.delete_requested_at
+  const deletionBanner = ev.deleting
     ? `<p style="color:#b45309;background:#fffbeb;padding:8px;border:1px solid #f59e0b;border-radius:6px;">
-         This event is scheduled for deletion. The host can undo deletion for a limited time.
-       </p>`
+         This event is scheduled for deletion. The host can undo this for 7 days.</p>`
     : '';
 
-  const eventInfoHTML = `
+  const passwordNudge = !me.has_password ? `
+    <div class="nudge" id="pwdNudge">
+      You don't have a password, so you can only make changes from this browser.
+      <button type="button" class="linkish" id="showPwdForm">Add a password</button>
+      <form id="pwdForm" style="display:none;margin-top:6px;gap:6px;flex-wrap:wrap;">
+        <input type="password" id="newPwd" maxlength="72" autocomplete="new-password" placeholder="New password (4+ characters)">
+        <button type="submit">Save</button>
+        <div id="pwdErr" class="err"></div>
+      </form>
+    </div>` : '';
+
+  $('app').innerHTML = `
+    <h2 class="event-title">${esc(ev.name)}</h2>
     <div class="event-info">
       ${deletionBanner}
-      ${currentEvent.event_description ? `<p class="event-description">${currentEvent.event_description}</p>` : ''}
-      ${currentEvent.event_date ? `<p class="event-date">Date: ${currentEvent.event_date}</p>` : ''}
-      ${currentEvent.event_time ? `<p class="event-time">Time: ${formatEventTime(currentEvent.event_time)}</p>` : ''}
-      ${
-        currentEvent.event_location
-          ? `<p class="event-location">Location: ${currentEvent.event_location} ${
-              googleMapsUrl ? `(<a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer">open in Google Maps</a>)` : ''
-            }</p>`
-          : ''
-      }
+      ${eventInfoHTML()}
+      <p style="font-size:.9rem;color:#475569;">
+        Responding as <strong>${esc(me.name)}</strong>${me.rsvp === 'no' ? ' (not going)' : ''} ·
+        <button type="button" class="linkish" id="signOutBtn">Not you?</button>
+      </p>
+      ${passwordNudge}
       <div id="shareUrlContainer">
-        <input type="text" id="shareUrl" value="${location.origin}/#/event/${currentEvent.slug}" readonly>
+        <input type="text" id="shareUrl" value="${esc(eventUrl())}" readonly>
         <button id="copyShareUrl" type="button">Copy URL to Share Event</button>
-        ${ isCreator ? `
-            <button id="editEventBtn" type="button">Edit Event</button>
-            ${ currentEvent.collect_real_emails ? `<button id="sendRemindersBtn" type="button">Send Email Reminders</button>` : '' }
-            ${
-              currentEvent.delete_requested_at
-                ? `<button id="undeleteEventBtn" type="button" style="background:#dcfce7;color:#14532d;">Undo Delete</button>`
-                : `<button id="deleteEventBtn" type="button" style="background:#fee2e2;color:#7f1d1d;">Delete Event</button>`
-            }
-          ` : '' }
+        ${isHost ? `
+          <button id="editEventBtn" type="button">Edit Event</button>
+          ${ev.collect_emails ? `<button id="sendRemindersBtn" type="button">Send Email Reminders</button>` : ''}
+          ${ev.deleting
+            ? `<button id="undeleteEventBtn" type="button" style="background:#dcfce7;color:#14532d;">Undo Delete</button>`
+            : `<button id="deleteEventBtn" type="button" style="background:#fee2e2;color:#7f1d1d;">Delete Event</button>`}
+        ` : ''}
       </div>
     </div>
-  `;
-
-  const creatorSummaryHTML = isCreator ? await renderCreatorSummaryBox() : '';
-
-  const itemsSectionHTML = isCreator
-    ? `
-      <h3>Items Needed</h3>
-      <div class="csv-actions" style="margin:10px 0; display:flex; gap:8px; align-items:center;">
-        <button id="exportCSV" type="button">Export CSV</button>
-        <button id="importCSV" type="button">Import CSV</button>
-        <input id="importCSVInput" type="file" accept=".csv,text/csv" style="display:none" />
-      </div>
-      ${renderManageItems()}
-    `
-    : `
-      <h3>Items Needed</h3>
-      <br><br>
-      ${renderViewItems()}
-    `;
-
-  const commitmentFormHTML = await renderCommitmentForm();
-
-  app.innerHTML = `
-    <h2 class="event-title">${currentEvent.event_name}</h2>
-    ${eventInfoHTML}
-    ${creatorSummaryHTML}
+    ${isHost ? renderHostSummary() : ''}
     <div class="dashboard">
-      <div class="items">${itemsSectionHTML}</div>
+      <div class="items">
+        <h3>Items Needed</h3>
+        ${isHost ? `
+          <div class="csv-actions" style="margin:10px 0; display:flex; gap:8px; align-items:center;">
+            <button id="exportCSV" type="button">Export CSV</button>
+            <button id="importCSV" type="button">Import CSV</button>
+            <input id="importCSVInput" type="file" accept=".csv,text/csv" style="display:none" />
+          </div>
+          ${renderManageItems()}` : renderViewItems()}
+      </div>
       <div class="commitments">
         <h3>Your Commitments</h3>
-        <br><br>
-        ${commitmentFormHTML}
+        <div id="commitErr" class="err"></div>
+        ${renderCommitmentForm()}
+        ${!isHost && me.rsvp === 'yes' ? `
         <details id="declineInline" style="margin-top:12px;">
-          <summary style="cursor:pointer;">Can't make it? RSVP “No”</summary>
+          <summary style="cursor:pointer;">Can't make it? RSVP "No"</summary>
           <form id="declineInlineForm" style="margin-top:8px;">
             <label for="declineInlineMsg" style="display:block;margin-bottom:4px;">Message to host (optional)</label>
-            <textarea id="declineInlineMsg" rows="3" style="width:100%;"></textarea>
+            <textarea id="declineInlineMsg" rows="3" maxlength="280" style="width:100%;"></textarea>
             <div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end;">
-              <button type="submit">Confirm RSVP “No”</button>
+              <button type="submit">Confirm RSVP "No"</button>
             </div>
-            <div id="declineInlineErr" style="display:none;color:#b00020;margin-top:.25rem;"></div>
+            <div id="declineInlineErr" class="err"></div>
           </form>
-        </details>
+        </details>` : ''}
+        ${me.rsvp === 'no' ? `<p style="margin-top:12px;">Plans changed? <button type="button" class="linkish" id="rsvpYesAgain">Switch to going</button></p>` : ''}
       </div>
     </div>
   `;
 
-  if (isCreator) {
-    document.getElementById('addItemForm')?.addEventListener('submit', handleAddItem);
-    document.getElementById('exportCSV')?.addEventListener('click', exportCSV);
-    const importBtn = document.getElementById('importCSV');
-    const fileInput = document.getElementById('importCSVInput');
-    importBtn?.addEventListener('click', () => fileInput.click());
-    fileInput?.addEventListener('change', importCSVFile);
-    document.getElementById('editEventBtn')?.addEventListener('click', showEditEventForm);
-    document.getElementById('sendRemindersBtn')?.addEventListener('click', sendReminderEmails);
-    document.getElementById('deleteEventBtn')?.addEventListener('click', confirmDeleteEvent);
-    document.getElementById('undeleteEventBtn')?.addEventListener('click', confirmUndeleteEvent);
+  $('signOutBtn').addEventListener('click', signOut);
+  $('showPwdForm')?.addEventListener('click', () => { $('pwdForm').style.display = 'flex'; $('newPwd').focus(); });
+  $('pwdForm')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitWith(e.target, 'pwdErr', () => rpc('update_me', { p_slug: slug, p: { password: $('newPwd').value } }));
+  });
+  $('copyShareUrl').addEventListener('click', copyShareUrl);
+  $('declineInlineForm')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitWith(e.target, 'declineInlineErr', () => rpc('update_me', { p_slug: slug, p: { rsvp: 'no', message: $('declineInlineMsg').value } }));
+  });
+  $('rsvpYesAgain')?.addEventListener('click', () => mutate(() => rpc('update_me', { p_slug: slug, p: { rsvp: 'yes' } })));
+  $('app').querySelectorAll('[data-commit]').forEach((b) => b.addEventListener('click', () => commitItem(b.dataset.commit)));
+
+  if (isHost) {
+    $('exportCSV').addEventListener('click', exportCSV);
+    $('importCSV').addEventListener('click', () => $('importCSVInput').click());
+    $('importCSVInput').addEventListener('change', importCSVFile);
+    $('editEventBtn').addEventListener('click', showEditEventForm);
+    $('sendRemindersBtn')?.addEventListener('click', sendReminderEmails);
+    $('deleteEventBtn')?.addEventListener('click', () => confirmDeletion(true));
+    $('undeleteEventBtn')?.addEventListener('click', () => confirmDeletion(false));
+    $('addItemForm')?.addEventListener('submit', handleAddItem);
+    $('app').querySelectorAll('[data-update-item]').forEach((b) => b.addEventListener('click', () => updateItem(b.dataset.updateItem)));
+    $('app').querySelectorAll('[data-delete-item]').forEach((b) => b.addEventListener('click', () => deleteItem(b.dataset.deleteItem)));
+    $('app').querySelectorAll('[data-remove-guest]').forEach((b) => b.addEventListener('click', () => removeGuest(b.dataset.removeGuest)));
   }
 
-  document.getElementById('copyShareUrl')?.addEventListener('click', async () => {
-    const url = `${location.origin}/#/event/${currentEvent.slug}`;
-    try { await navigator.clipboard.writeText(url); }
-    catch {
-      const shareInput = document.getElementById('shareUrl');
-      shareInput.select();
-      document.execCommand('copy');
-    }
-  });
-
-  document.getElementById('declineInlineForm')?.addEventListener('submit', declineFromDashboard);
-
-  attachCommitListeners();
   promptForEmailIfRequired();
 }
 
-// ---------- Creator Summary ----------
-async function renderCreatorSummaryBox() {
-  const counts = await getRsvpCounts();
-  const breakdownTable = await renderCommitmentBreakdownTable();
-  const yesListHTML = await renderYesList();
-  const declinesHTML = await renderDeclinesList();
+// Run a mutation that returns a fresh view; report errors with alert.
+async function mutate(fn) {
+  try { apply(await fn()); }
+  catch (err) { alert(errMsg(err)); }
+}
+
+async function copyShareUrl() {
+  try { await navigator.clipboard.writeText(eventUrl()); }
+  catch { $('shareUrl').select(); document.execCommand('copy'); }
+}
+
+async function signOut() {
+  const warn = view.me.has_password
+    ? 'Sign out of this event on this browser? You can sign back in with your name and password.'
+    : 'You have no password, so after signing out you will NOT be able to change your response again. Continue?';
+  if (!confirm(warn)) return;
+  await mutate(() => rpc('sign_out', { p_slug: slug }));
+}
+
+// ---------- Host summary ----------
+function renderHostSummary() {
+  const guests = view.guests || [];
+  const yes = guests.filter((g) => g.rsvp === 'yes');
+  const no = guests.filter((g) => g.rsvp === 'no');
+  const removeBtn = (g) => g.name === view.event.host ? '' :
+    ` <button type="button" class="linkish" style="font-size:.8rem;color:#991b1b" data-remove-guest="${esc(g.name)}">remove</button>`;
 
   return `
-    <details open style="margin:14px 0;border:1px solid #e5e7eb;border-radius:10px;background:#fff;">
+    <details open class="creator-summary" style="margin:14px 0;border:1px solid #e5e7eb;border-radius:10px;background:#fff;">
       <summary style="cursor:pointer;padding:.7rem 1rem;font-weight:600;color:#0f172a">
-        Event Summary — <span style="color:#0a5">${counts.yes} going</span> · <span style="color:#a00">${counts.no} no</span>
+        Event Summary — <span style="color:#0a5">${yes.length} going</span> · <span style="color:#a00">${no.length} no</span>
       </summary>
       <div style="padding:.75rem 1rem 1rem 1rem;">
-        ${breakdownTable ? `
+        ${view.items.length ? `
           <div style="margin:.5rem 0 1rem 0;">
             <div style="font-weight:600;margin-bottom:.25rem;">Commitment Breakdown</div>
-            ${breakdownTable}
+            ${renderBreakdownTable()}
           </div>` : ''}
-
-        ${yesListHTML ? `
+        ${yes.length ? `
           <div style="margin:1rem 0;">
-            <div style="font-weight:600;margin-bottom:.25rem;">RSVP “Yes”</div>
-            ${yesListHTML}
+            <div style="font-weight:600;margin-bottom:.25rem;">RSVP "Yes"</div>
+            <ul style="list-style:none;padding:0;margin:0;">
+              ${yes.map((g) => `
+                <li style="margin:.35rem 0;padding:.4rem .6rem;background:#f8fafc;border:1px solid #eef2f7;border-radius:8px;">
+                  <strong>${esc(g.name)}</strong>${g.email ? ` <span style="color:#64748b;">— ${esc(g.email)}</span>` : ''}${removeBtn(g)}
+                </li>`).join('')}
+            </ul>
           </div>` : ''}
-
-        ${declinesHTML ? `
+        ${no.length ? `
           <div style="margin:1rem 0;">
-            <div style="font-weight:600;margin-bottom:.25rem;">RSVP “No”</div>
-            ${declinesHTML}
+            <div style="font-weight:600;margin-bottom:.25rem;">RSVP "No"</div>
+            <ul style="list-style:none;padding:0;margin:0;">
+              ${no.map((g) => `
+                <li style="margin:.5rem 0;padding:.5rem .75rem;background:#fafafa;border:1px solid #eee;border-radius:8px;">
+                  <strong>${esc(g.name)}</strong>${g.message ? ` — <em>${esc(g.message)}</em>` : ''}${removeBtn(g)}
+                  <div style="color:#666;font-size:.85rem;margin-top:2px;">${esc(new Date(g.responded_at).toLocaleString())}</div>
+                </li>`).join('')}
+            </ul>
           </div>` : ''}
       </div>
     </details>
   `;
 }
 
-
-async function renderYesList() {
-  const { data: rows, error } = await supabase
-    .from('event_users')
-    .select('username, real_email, created_at')
-    .eq('event_id', currentEvent.id)
-    .eq('rsvp_status', 'yes')
-    .order('username', { ascending: true });
-
-  if (error || !rows || rows.length === 0) return '';
-
-  const esc = (s='') => s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
-  return `
-    <ul style="list-style:none;padding:0;margin:0;">
-      ${rows.map(d => `
-        <li style="margin:.35rem 0; padding:.4rem .6rem; background:#f8fafc; border:1px solid #eef2f7; border-radius:8px;">
-          <strong>${esc(d.username)}</strong>
-          ${d.real_email ? ` <span style="color:#64748b;">— ${esc(d.real_email)}</span>` : ''}
-        </li>
-      `).join('')}
-    </ul>
-  `;
-}
-
-
-// "RSVP No" list (filters out stale fallback rows when username is not currently "no")
-async function renderDeclinesList() {
-  let rows = [];
-  const noSet = new Set();
-
-  try {
-    const { data: eu, error } = await supabase
-      .from('event_users')
-      .select('username, decline_message, decline_at, created_at, rsvp_status')
-      .eq('event_id', currentEvent.id);
-    if (!error && Array.isArray(eu)) {
-      eu.forEach(r => { if (r.rsvp_status === 'no') noSet.add(String(r.username || '').toLowerCase()); });
-      rows.push(
-        ...eu
-          .filter(r => r.rsvp_status === 'no')
-          .map(d => ({
-            username: d.username,
-            message: d.decline_message,
-            ts: d.decline_at || d.created_at
-          }))
-      );
-    }
-  } catch {}
-
-  try {
-    const { data: rs } = await supabase
-      .from('rsvps')
-      .select('username, message, created_at, status')
-      .eq('event_id', currentEvent.id);
-    if (Array.isArray(rs)) {
-      rows.push(
-        ...rs
-          .filter(r => r.status === 'no' && !noSet.has(String(r.username || '').toLowerCase()))
-          .map(r => ({ username: r.username, message: r.message, ts: r.created_at }))
-      );
-    }
-  } catch {}
-
-  if (!rows.length) return '';
-
-  rows.sort((a,b) => new Date(b.ts) - new Date(a.ts));
-  const esc = (s='') => s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
-
-  return `
-    <ul style="list-style:none;padding:0;margin:0;">
-      ${rows.map(d => `
-        <li style="margin:.5rem 0; padding:.5rem .75rem; background:#fafafa; border:1px solid #eee; border-radius:8px;">
-          <strong>${esc(d.username)}</strong>
-          ${d.message ? ` — <em>${esc(d.message)}</em>` : ''}
-          <div style="color:#666;font-size:.85rem;margin-top:2px;">
-            ${new Date(d.ts).toLocaleString()}
-          </div>
-        </li>
-      `).join('')}
-    </ul>
-  `;
-}
-
-// Commitment breakdown table
-async function renderCommitmentBreakdownTable() {
-  const { data: usersData } = await supabase
-    .from('event_users')
-    .select('id, username')
-    .eq('event_id', currentEvent.id);
-  const nameById = Object.fromEntries((usersData || []).map(u => [u.id, u.username]));
-
-  const { data: rows } = await supabase
-    .from('commitments')
-    .select('quantity, item_id, user_id')
-    .eq('event_id', currentEvent.id);
-
-  if (!rows || rows.length === 0) return '';
-
-  const byItem = {};
-  rows.forEach(r => {
-    const itemId = r.item_id;
-    if (!byItem[itemId]) byItem[itemId] = [];
-    byItem[itemId].push({ user: nameById[r.user_id] || 'Unknown', qty: Number(r.quantity || 0) });
-  });
-
-  const body = currentEvent.items.map(it => {
-    const list = byItem[it.id] || [];
-    const total = list.reduce((s, r) => s + r.qty, 0);
-    const chips = list.map(r => `<span class="pill">${r.user} × ${r.qty}</span>`).join(' ');
+function renderBreakdownTable() {
+  const rows = view.items.map((it) => {
+    const chips = it.who.map((w) => `<span class="pill">${esc(w.name)} × ${Number(w.qty)}</span>`).join(' ');
     let cls = 'cb-row-open';
-    if (total >= it.quantity_required && it.quantity_required > 0) cls = 'cb-row-full';
-    else if (total > 0 && total < it.quantity_required) cls = 'cb-row-partial';
-
+    if (it.committed >= it.needed) cls = 'cb-row-full';
+    else if (it.committed > 0) cls = 'cb-row-partial';
     return `
       <tr class="${cls}">
-        <td style="padding:10px 12px;">${it.item_name}</td>
-        <td style="padding:10px 12px;">${it.quantity_required}</td>
-        <td style="padding:10px 12px;">${total}</td>
+        <td style="padding:10px 12px;">${esc(it.name)}</td>
+        <td style="padding:10px 12px;">${Number(it.needed)}</td>
+        <td style="padding:10px 12px;">${Number(it.committed)}</td>
         <td style="padding:10px 12px;">${chips || '<span style="color:#94a3b8">—</span>'}</td>
-      </tr>
-    `;
+      </tr>`;
   }).join('');
-
   return `
     <table style="width:100%; border-collapse:collapse; font-size:14px;">
-      <thead class="cb-head">
-        <tr>
-          <th style="text-align:left; padding:10px 12px;">Item</th>
-          <th style="text-align:left; padding:10px 12px;">Required</th>
-          <th style="text-align:left; padding:10px 12px;">Total</th>
-          <th style="text-align:left; padding:10px 12px;">Who</th>
-        </tr>
-      </thead>
-      <tbody>${body}</tbody>
-    </table>
-  `;
+      <thead class="cb-head"><tr>
+        <th style="text-align:left; padding:10px 12px;">Item</th>
+        <th style="text-align:left; padding:10px 12px;">Required</th>
+        <th style="text-align:left; padding:10px 12px;">Total</th>
+        <th style="text-align:left; padding:10px 12px;">Who</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
-function showEditEventForm() {
-  if (!currentUser || currentUser.username !== currentEvent.created_by) return;
-
-  const overlay = document.createElement('div');
-  overlay.id = 'editEventOverlay';
-  overlay.style.position = 'fixed';
-  overlay.style.top = 0; overlay.style.left = 0;
-  overlay.style.width = '100%'; overlay.style.height = '100%';
-  overlay.style.backgroundColor = 'rgba(0,0,0,0.5)';
-  overlay.style.display = 'flex'; overlay.style.alignItems = 'center'; overlay.style.justifyContent = 'center';
-  overlay.style.zIndex = 2000;
-
-  const box = document.createElement('div');
-  box.style.background = '#fff'; box.style.padding = '20px'; box.style.borderRadius = '8px';
-  box.style.maxWidth = '420px'; box.style.width = '90%';
-
-  box.innerHTML = `
-    <h3>Edit Event</h3>
-    <label>Event Name</label>
-    <input type="text" id="editEventName" value="${currentEvent.event_name}" />
-
-    <label style="margin-top:10px;">Event Description</label>
-    <textarea id="editEventDescription">${currentEvent.event_description || ''}</textarea>
-
-    <label style="margin-top:10px;">Event Date</label>
-    <input type="date" id="editEventDate" value="${currentEvent.event_date || ''}" />
-
-    <label style="margin-top:10px;">Event Time</label>
-    <input type="time" id="editEventTime" value="${currentEvent.event_time || ''}" />
-
-    <label style="margin-top:10px;">Event Location</label>
-    <input type="text" id="editEventLocation" value="${currentEvent.event_location || ''}" />
-    <input type="hidden" id="editEventLocationPlaceId" value="${currentEvent.event_place_id || ''}" />
-    <input type="hidden" id="editEventLocationLat" value="${currentEvent.event_lat || ''}" />
-    <input type="hidden" id="editEventLocationLng" value="${currentEvent.event_lng || ''}" />
-
-    <label style="margin-top:10px;display:flex;gap:.5rem;align-items:center;">
-      <input type="checkbox" id="editCollectEmails" ${currentEvent.collect_real_emails ? 'checked' : ''}>
-      Require attendee emails for reminders
-    </label>
-
-    <div style="margin-top:15px; text-align:right;">
-      <button id="saveEventChanges">Save</button>
-      <button id="cancelEventEdit" style="margin-left:8px; background:#ccc; color:#000;">Cancel</button>
-    </div>
-  `;
-
-  overlay.appendChild(box);
-  document.body.appendChild(overlay);
-
-  const editLocInput = document.getElementById('editEventLocation');
-  attachOSMAutocomplete(editLocInput, (place) => {
-    document.getElementById('editEventLocationPlaceId').value = place.osm_id ? `osm:${place.osm_type}:${place.osm_id}` : '';
-    document.getElementById('editEventLocationLat').value = place.lat || '';
-    document.getElementById('editEventLocationLng').value = place.lon || '';
-  });
-
-  document.getElementById('cancelEventEdit').addEventListener('click', closeEditEventForm);
-  document.getElementById('saveEventChanges').addEventListener('click', async () => {
-    const newName = document.getElementById('editEventName').value.trim();
-    const newDesc = document.getElementById('editEventDescription').value.trim();
-    const newDate = document.getElementById('editEventDate').value;
-    const newTime = document.getElementById('editEventTime').value;
-    const newLoc = document.getElementById('editEventLocation').value.trim();
-    const newLocPlaceId = document.getElementById('editEventLocationPlaceId').value.trim();
-    const newLocLat = document.getElementById('editEventLocationLat').value.trim();
-    const newLocLng = document.getElementById('editEventLocationLng').value.trim();
-    const collectEmails = document.getElementById('editCollectEmails').checked;
-
-    const { error } = await supabase
-      .from('events')
-      .update({
-        event_name: newName,
-        event_description: newDesc || null,
-        event_date: newDate || null,
-        event_time: newTime || null,
-        event_location: newLoc || null,
-        event_place_id: newLocPlaceId || null,
-        event_lat: newLocLat ? Number(newLocLat) : null,
-        event_lng: newLocLng ? Number(newLocLng) : null,
-        collect_real_emails: collectEmails
-      })
-      .eq('id', currentEvent.id);
-
-    if (error) { alert('Error updating event: ' + error.message); return; }
-
-    closeEditEventForm();
-    loadEvent(currentEvent.slug);
-  });
-}
-
-function closeEditEventForm() {
-  const el = document.getElementById('editEventOverlay');
-  if (el) el.remove();
-}
-
+// ---------- Items ----------
 function renderManageItems() {
   return `
     <div id="itemList">
-      ${currentEvent.items.map((item) => `
+      ${view.items.map((item) => `
         <div class="item-card">
-          <input type="text" value="${item.item_name}" id="edit-item-${item.id}">
-          <input type="number" value="${item.quantity_required}" id="edit-qty-${item.id}" min="1">
-          <input type="text" value="${item.item_description || ''}" id="edit-desc-${item.id}" placeholder="Item description (optional)">
-          <button onclick="updateItem('${item.id}')">Update</button>
-          <button onclick="deleteItem('${item.id}')">Delete</button>
-        </div>
-      `).join('')}
+          <input type="text" value="${esc(item.name)}" id="edit-item-${esc(item.id)}" maxlength="120">
+          <input type="number" value="${Number(item.needed)}" id="edit-qty-${esc(item.id)}" min="1" max="999">
+          <input type="text" value="${esc(item.description || '')}" id="edit-desc-${esc(item.id)}" maxlength="300" placeholder="Item description (optional)">
+          <button type="button" data-update-item="${esc(item.id)}">Update</button>
+          <button type="button" data-delete-item="${esc(item.id)}">Delete</button>
+        </div>`).join('')}
     </div>
     <form id="addItemForm" class="form">
-      <input type="text" id="newItemName" placeholder="Item Name" required>
-      <input type="number" id="newItemQuantity" placeholder="Quantity" min="1" required>
-      <input type="text" id="newItemDescription" placeholder="Item description (optional)">
+      <input type="text" id="newItemName" placeholder="Item Name" maxlength="120" required>
+      <input type="number" id="newItemQuantity" placeholder="Quantity" min="1" max="999" required>
+      <input type="text" id="newItemDescription" placeholder="Item description (optional)" maxlength="300">
       <button type="submit">Add Item</button>
     </form>
   `;
 }
 
 function renderViewItems() {
-  if (!currentEvent.items || currentEvent.items.length === 0) return `<p>No items listed for this event yet.</p>`;
-  return currentEvent.items.map((item) => `
+  if (!view.items.length) return `<p>No items listed for this event yet.</p>`;
+  return view.items.map((item) => `
     <div class="item-card">
-      <p>${item.item_name} - ${item.quantity_required} needed</p>
-      ${item.item_description ? `<p><em>${item.item_description}</em></p>` : ''}
-    </div>
-  `).join('');
+      <p>${esc(item.name)} — ${Number(item.committed)} of ${Number(item.needed)} covered</p>
+      ${item.description ? `<p><em>${esc(item.description)}</em></p>` : ''}
+      ${item.who.length ? `<p style="color:#475569;font-size:.85rem;">${item.who.map((w) => `${esc(w.name)} × ${Number(w.qty)}`).join(', ')}</p>` : ''}
+    </div>`).join('');
 }
 
-// ---------- Commitments UI ----------
-async function renderCommitmentForm() {
-  const { data: allCommitments } = await supabase
-    .from('commitments').select('*').eq('event_id', currentEvent.id);
-
-  const totals = {};
-  const mine = {};
-  (allCommitments || []).forEach(c => {
-    totals[c.item_id] = (totals[c.item_id] || 0) + Number(c.quantity || 0);
-    if (currentUser && c.user_id === currentUser.id) mine[c.item_id] = Number(c.quantity || 0);
-  });
-
-  const committed = [];
-  const open = [];
-  const full = [];
-
-  currentEvent.items.forEach(item => {
-    const total = totals[item.id] || 0;
-    const myQty = mine[item.id] ?? 0;
-    const remaining = Math.max(0, item.quantity_required - total);
-
-    const availableForOthers = item.quantity_required - (total - myQty);
-
-    let disabledAttr = '';
-    let btnLabel = myQty > 0 ? 'Update' : 'Commit';
-    if (availableForOthers <= 0 && myQty === 0) {
-      disabledAttr = 'disabled aria-disabled="true" style="opacity:.5;cursor:not-allowed;"';
-    }
-
+function renderCommitmentForm() {
+  if (view.me.rsvp !== 'yes') return '<p>You said you can\'t make it.</p>';
+  const committed = [], open = [], full = [];
+  view.items.forEach((item) => {
+    const remaining = Math.max(0, item.needed - item.committed);
+    const canCommit = item.needed - (item.committed - item.mine) > 0 || item.mine > 0;
     const card = `
       <div class="commitment-card" style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin:8px 0;background:#fff;">
-        <strong style="display:block;text-align:center;margin-bottom:6px;">${item.item_name}</strong>
-        <div>Required: ${item.quantity_required}</div>
-        <div>Total Committed: ${total}</div>
-        <div>Your Commitment: ${myQty}</div>
+        <strong style="display:block;text-align:center;margin-bottom:6px;">${esc(item.name)}</strong>
+        <div>Required: ${Number(item.needed)}</div>
+        <div>Total Committed: ${Number(item.committed)}</div>
+        <div>Your Commitment: ${Number(item.mine)}</div>
         <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
-          <input type="number" id="commit-${item.id}" value="${String(myQty ?? 0)}" min="0" style="flex:1;"/>
+          <input type="number" id="commit-${esc(item.id)}" value="${Number(item.mine)}" min="0" max="999" style="flex:1;"/>
           <span>Remaining: ${remaining}</span>
-          <button id="commitbtn-${item.id}" ${disabledAttr} onclick="commitItem('${item.id}')">${btnLabel}</button>
+          <button type="button" data-commit="${esc(item.id)}" ${canCommit ? '' : 'disabled aria-disabled="true" style="opacity:.5;cursor:not-allowed;"'}>${item.mine > 0 ? 'Update' : 'Commit'}</button>
         </div>
-      </div>
-    `;
-
-    if (myQty > 0) committed.push(card);
-    else if (total < item.quantity_required) open.push(card);
+      </div>`;
+    if (item.mine > 0) committed.push(card);
+    else if (item.committed < item.needed) open.push(card);
     else full.push(card);
   });
-
   let html = '';
-  if (committed.length) {
-    html += `<h4 class="commit-sec-title">Items You’ve Committed To</h4>${committed.join('')}`;
-  }
-  if (open.length) {
-    html += `<div class="sec-divider"></div><h4 class="commit-sec-title open">Items Still Open (Under-committed)</h4>${open.join('')}`;
-  }
-  if (full.length) {
-    html += `<div class="sec-divider"></div><h4 class="commit-sec-title full">Items Fully Committed</h4>${full.join('')}`;
-  }
+  if (committed.length) html += `<h4 class="commit-sec-title">Items You've Committed To</h4>${committed.join('')}`;
+  if (open.length) html += `<div class="sec-divider"></div><h4 class="commit-sec-title open">Items Still Open (Under-committed)</h4>${open.join('')}`;
+  if (full.length) html += `<div class="sec-divider"></div><h4 class="commit-sec-title full">Items Fully Committed</h4>${full.join('')}`;
   return html || '<p>No items yet.</p>';
 }
 
 // ----------------------
-// 4. Item & Commitment Actions
+// 4. Actions
 // ----------------------
-async function handleAddItem(e) {
-  e.preventDefault();
-  const newItemName = document.getElementById('newItemName').value.trim();
-  const newItemQuantity = parseInt(document.getElementById('newItemQuantity').value, 10);
-  const newItemDescription = document.getElementById('newItemDescription').value.trim();
-  if (!newItemName || isNaN(newItemQuantity) || newItemQuantity <= 0) {
-    alert('Please provide a valid item name and a positive integer for quantity.');
-    return;
-  }
-  const insertData = {
-    event_id: currentEvent.id,
-    item_name: newItemName,
-    quantity_required: newItemQuantity,
-    ...(newItemDescription ? { item_description: newItemDescription } : {})
-  };
-  const { error } = await supabase.from('event_items').insert([insertData]);
-  if (error) alert('Error adding item: ' + error.message);
-  else loadEvent(currentEvent.slug);
-}
-
-async function updateItem(itemId) {
-  if (currentUser?.username !== currentEvent.created_by) { alert('Only the event creator can update items.'); return; }
-  const newItemName = document.getElementById(`edit-item-${itemId}`).value.trim();
-  const newQuantity = parseInt(document.getElementById(`edit-qty-${itemId}`).value, 10);
-  const newDescription = document.getElementById(`edit-desc-${itemId}`)?.value.trim();
-  if (!newItemName || isNaN(newQuantity) || newQuantity <= 0) { alert('Please provide valid values.'); return; }
-
-  const { data: commitmentsData } = await supabase.from('commitments').select('quantity').eq('item_id', itemId);
-  const totalCommitted = (commitmentsData || []).reduce((s, c) => s + c.quantity, 0);
-  if (newQuantity < totalCommitted) { alert(`Cannot reduce required quantity to ${newQuantity}. ${totalCommitted} already committed.`); return; }
-
-  const updateData = { item_name: newItemName, quantity_required: newQuantity };
-  if (newDescription !== undefined) updateData.item_description = newDescription;
-
-  const { error } = await supabase.from('event_items').update(updateData).eq('id', itemId);
-  if (error) alert(`Error updating item: ${error.message}`);
-  else loadEvent(currentEvent.slug);
-}
-
-async function deleteItem(itemId) {
-  if (currentUser?.username !== currentEvent.created_by) { alert('Only the event creator can delete items.'); return; }
-  if (!confirm('Are you sure you want to delete this item? This cannot be undone.')) return;
-  const { error } = await supabase.from('event_items').delete().eq('id', itemId);
-  if (error) alert(`Error deleting item: ${error.message}`);
-  else loadEvent(currentEvent.slug);
-}
-
 async function commitItem(itemId) {
-  if (currentUser?.rsvp_status !== 'yes') {
-    alert('You need to RSVP “Yes” to make commitments.');
-    return;
-  }
-
-  const inputEl = document.getElementById(`commit-${itemId}`);
-  const raw = inputEl.value.trim();
-  if (raw === '') { alert('Please enter a number (0 or more).'); return; }
-  const quantity = Number(raw);
-  if (!Number.isInteger(quantity) || quantity < 0) { alert('Please enter a non-negative integer.'); return; }
-
-  const { data: itemData, error: itemErr } = await supabase
-    .from('event_items').select('quantity_required').eq('id', itemId).single();
-  if (itemErr || !itemData) { alert(`Error fetching item details: ${itemErr?.message}`); return; }
-  const required = Number(itemData.quantity_required);
-
-  const { data: all } = await supabase
-    .from('commitments')
-    .select('user_id, quantity')
-    .eq('item_id', itemId);
-
-  const myCurrent = (all || []).find(r => r.user_id === currentUser.id)?.quantity || 0;
-  const totalOthers = (all || []).reduce((s, r) => s + (r.user_id === currentUser.id ? 0 : Number(r.quantity || 0)), 0);
-
-  if (quantity > (required - totalOthers)) {
-    const available = Math.max(0, required - totalOthers);
-    alert(`Cannot commit ${quantity}. Only ${available} slot(s) available.`);
-    return;
-  }
-
-  if (quantity === 0) {
-    await supabase.from('commitments')
-      .delete()
-      .eq('event_id', currentEvent.id)
-      .eq('user_id', currentUser.id)
-      .eq('item_id', itemId);
-  } else {
-    await supabase.from('commitments').upsert([
-      { event_id: currentEvent.id, user_id: currentUser.id, item_id: itemId, quantity }
-    ], { onConflict: ['event_id', 'user_id', 'item_id'] });
-  }
-
-  await loadEvent(currentEvent.slug);
+  const raw = $(`commit-${itemId}`).value.trim();
+  const qty = Number(raw);
+  if (raw === '' || !Number.isInteger(qty) || qty < 0) { showErr('commitErr', 'Please enter a whole number (0 or more).'); return; }
+  try { apply(await rpc('set_commitment', { p_item_id: itemId, p_qty: qty })); }
+  catch (err) { showErr('commitErr', errMsg(err)); }
 }
 
-// inline decline from dashboard (yes → no) + delete commitments
-async function declineFromDashboard(e) {
+function handleAddItem(e) {
   e.preventDefault();
-  const msgEl = document.getElementById('declineInlineMsg');
-  const errEl = document.getElementById('declineInlineErr');
-  setText('declineInlineErr',''); hide(errEl);
-
-  if (!currentUser) { alert('Please sign in first.'); return; }
-
-  const nowIso = new Date().toISOString();
-  const message = (msgEl.value || '').trim().slice(0, 280);
-
-  const { error: uErr } = await supabase.from('event_users').update({
-    rsvp_status: 'no',
-    wants_reminders: false,
-    decline_message: message || null,
-    decline_at: nowIso
-  }).eq('id', currentUser.id).eq('event_id', currentEvent.id);
-  if (uErr) { setText('declineInlineErr', `Error updating RSVP: ${uErr.message}`); show(errEl); return; }
-
-  await supabase.from('commitments').delete()
-    .eq('event_id', currentEvent.id)
-    .eq('user_id', currentUser.id);
-
-  await loadEvent(currentEvent.slug);
+  mutate(() => rpc('host_save_item', {
+    p_slug: slug, p_item_id: null,
+    p_name: $('newItemName').value,
+    p_needed: parseInt($('newItemQuantity').value, 10),
+    p_description: $('newItemDescription').value
+  }));
 }
 
-// creator-only update handler (kept in sync with location)
-async function handleUpdateEventDetails(e) {
-  e.preventDefault();
-  const nameEl = document.getElementById('editEventName');
-  const descEl = document.getElementById('editEventDescription');
-  const dateEl = document.getElementById('editEventDate');
-  const timeEl = document.getElementById('editEventTime');
-  const locEl = document.getElementById('editEventLocation');
-  const locPlaceEl = document.getElementById('editEventLocationPlaceId');
-  const locLatEl = document.getElementById('editEventLocationLat');
-  const locLngEl = document.getElementById('editEventLocationLng');
-  const collectEl = document.getElementById('editCollectEmails');
+function updateItem(itemId) {
+  mutate(() => rpc('host_save_item', {
+    p_slug: slug, p_item_id: itemId,
+    p_name: $(`edit-item-${itemId}`).value,
+    p_needed: parseInt($(`edit-qty-${itemId}`).value, 10),
+    p_description: $(`edit-desc-${itemId}`).value
+  }));
+}
 
-  const updatedName = nameEl.value.trim();
-  const updatedDesc = descEl.value.trim();
-  const updatedDate = dateEl.value ? dateEl.value : null;
-  const updatedTime = timeEl.value ? timeEl.value : null;
-  const updatedLoc = locEl ? locEl.value.trim() : '';
-  const updatedLocPlace = locPlaceEl ? locPlaceEl.value.trim() : '';
-  const updatedLocLat = locLatEl ? locLatEl.value.trim() : '';
-  const updatedLocLng = locLngEl ? locLngEl.value.trim() : '';
-  const updatedCollect = collectEl ? collectEl.checked : currentEvent.collect_real_emails;
+function deleteItem(itemId) {
+  if (!confirm('Delete this item? Any commitments to it are removed too.')) return;
+  mutate(() => rpc('host_delete_item', { p_slug: slug, p_item_id: itemId }));
+}
 
-  if (!updatedName) { alert('Event name is required.'); return; }
+function removeGuest(name) {
+  if (!confirm(`Remove ${name} and anything they signed up to bring?`)) return;
+  mutate(() => rpc('host_remove_guest', { p_slug: slug, p_name: name }));
+}
 
-  const { error } = await supabase
-    .from('events')
-    .update({
-      event_name: updatedName,
-      event_description: updatedDesc || null,
-      event_date: updatedDate,
-      event_time: updatedTime,
-      event_location: updatedLoc || null,
-      event_place_id: updatedLocPlace || null,
-      event_lat: updatedLocLat ? Number(updatedLocLat) : null,
-      event_lng: updatedLocLng ? Number(updatedLocLng) : null,
-      collect_real_emails: updatedCollect
-    })
-    .eq('id', currentEvent.id);
+function overlay(innerHTML) {
+  const o = document.createElement('div');
+  o.style = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:3000;';
+  const box = document.createElement('div');
+  box.style = 'background:#fff;padding:20px;border-radius:10px;max-width:480px;width:92%;max-height:90vh;overflow:auto;';
+  box.innerHTML = innerHTML;
+  o.appendChild(box);
+  document.body.appendChild(o);
+  return o;
+}
 
-  if (error) { alert('Error updating event: ' + error.message); return; }
-  await loadEvent(currentEvent.slug);
+function showEditEventForm() {
+  const ev = view.event;
+  const o = overlay(`
+    <h3>Edit Event</h3>
+    <div id="editErr" class="err"></div>
+    <label>Event Name</label>
+    <input type="text" id="editEventName" maxlength="120" value="${esc(ev.name)}" />
+    <label style="margin-top:10px;">Event Description</label>
+    <textarea id="editEventDescription" maxlength="2000">${esc(ev.description || '')}</textarea>
+    <label style="margin-top:10px;">Event Date</label>
+    <input type="date" id="editEventDate" value="${esc(ev.date || '')}" />
+    <label style="margin-top:10px;">Event Time</label>
+    <input type="time" id="editEventTime" value="${esc(ev.time || '')}" />
+    <label style="margin-top:10px;">Event Location</label>
+    <input type="text" id="editEventLocation" maxlength="300" value="${esc(ev.location || '')}" />
+    <label style="margin-top:10px;display:flex;gap:.5rem;align-items:center;">
+      <input type="checkbox" id="editCollectEmails" ${ev.collect_emails ? 'checked' : ''}>
+      Require attendee emails for reminders
+    </label>
+    <div style="margin-top:15px; text-align:right;">
+      <button id="saveEventChanges">Save</button>
+      <button id="cancelEventEdit" style="margin-left:8px; background:#ccc; color:#000;">Cancel</button>
+    </div>
+  `);
+
+  const loc = { lat: ev.lat ?? '', lng: ev.lng ?? '', place_id: '' };
+  attachOSMAutocomplete($('editEventLocation'), (place) => {
+    loc.place_id = place.osm_id ? `osm:${place.osm_type}:${place.osm_id}` : '';
+    loc.lat = place.lat || ''; loc.lng = place.lon || '';
+  });
+  $('editEventLocation').addEventListener('input', () => { loc.lat = ''; loc.lng = ''; loc.place_id = ''; });
+
+  $('cancelEventEdit').addEventListener('click', () => o.remove());
+  $('saveEventChanges').addEventListener('click', async () => {
+    try {
+      const result = await rpc('host_update_event', {
+        p_slug: slug,
+        p: {
+          name: $('editEventName').value,
+          description: $('editEventDescription').value,
+          date: $('editEventDate').value,
+          time: $('editEventTime').value,
+          location: $('editEventLocation').value,
+          place_id: loc.place_id, lat: String(loc.lat), lng: String(loc.lng),
+          collect_emails: $('editCollectEmails').checked,
+          invite_url: ev.invite_url || ''
+        }
+      });
+      o.remove();
+      apply(result);
+    } catch (err) {
+      showErr('editErr', errMsg(err));
+    }
+  });
+}
+
+function confirmDeletion(deleting) {
+  const o = overlay(deleting ? `
+    <h3 style="margin:0 0 8px">Delete this event?</h3>
+    <p style="margin:0 0 10px;color:#444">It will be permanently removed after 7 days. You can undo until then.</p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button id="cancelDel" type="button">Cancel</button>
+      <button id="confirmDel" type="button" style="background:#b91c1c;color:#fff;">Delete</button>
+    </div>` : `
+    <h3 style="margin:0 0 8px">Undo deletion?</h3>
+    <p style="margin:0 0 10px;color:#444">This cancels the scheduled deletion and re-opens RSVPs.</p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button id="cancelDel" type="button">Cancel</button>
+      <button id="confirmDel" type="button" style="background:#166534;color:#fff;">Undo Delete</button>
+    </div>`);
+  $('cancelDel').onclick = () => o.remove();
+  $('confirmDel').onclick = async () => {
+    o.remove();
+    await mutate(() => rpc('host_set_deleted', { p_slug: slug, p_deleted: deleting }));
+  };
+}
+
+// Host turned on emails after this guest joined.
+function promptForEmailIfRequired() {
+  const me = view.me;
+  if (!view.event.collect_emails || me.rsvp !== 'yes' || me.email || me.is_host) return;
+  if ($('emailOverlay')) return;
+  const o = overlay(`
+    <h3>Email requested</h3>
+    <p>The host turned on email reminders for this event. Only the host can see your email.</p>
+    <div id="forceEmailErr" class="err"></div>
+    <input type="email" id="forceEmail" maxlength="254" style="width:100%;margin:10px 0;" placeholder="you@example.com">
+    <div style="text-align:right;display:flex;gap:8px;justify-content:flex-end;">
+      <button id="skipEmailBtn" type="button" style="background:#ccc;color:#000;">Not now</button>
+      <button id="saveEmailBtn" type="button">Save</button>
+    </div>
+  `);
+  o.id = 'emailOverlay';
+  $('skipEmailBtn').onclick = () => o.remove();
+  $('saveEmailBtn').onclick = async () => {
+    try {
+      const result = await rpc('update_me', { p_slug: slug, p: { email: $('forceEmail').value } });
+      o.remove();
+      apply(result);
+    } catch (err) { showErr('forceEmailErr', errMsg(err)); }
+  };
+}
+
+function sendReminderEmails() {
+  const btn = $('sendRemindersBtn');
+  const o = overlay(`
+    <h3 style="margin:0 0 8px">Send reminder emails</h3>
+    <p style="margin:0 0 8px;color:#555">Optional message to include near the top of the email:</p>
+    <textarea id="hostMsg" rows="5" maxlength="1000" style="width:100%;resize:vertical;" placeholder="(Optional) Add a note for attendees..."></textarea>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
+      <button id="cancelSend" type="button">Cancel</button>
+      <button id="confirmSend" type="button">Send</button>
+    </div>
+  `);
+  $('cancelSend').onclick = () => o.remove();
+  $('confirmSend').onclick = async () => {
+    const hostMsg = $('hostMsg').value.trim().slice(0, 1000);
+    o.remove();
+    btn.disabled = true;
+    try {
+      const { data, error } = await supabase.functions.invoke('send-reminders', { body: { slug, host_message: hostMsg } });
+      if (error) {
+        let detail = '';
+        try { detail = (await error.context?.json())?.error || ''; } catch { /* non-JSON body */ }
+        alert(`Error sending reminders: ${detail || error.message}`);
+        return;
+      }
+      if (data?.cooldown_remaining_seconds) {
+        const s = data.cooldown_remaining_seconds;
+        alert(`Too soon. Try again in ${Math.floor(s / 60)}m ${s % 60}s.`);
+        return;
+      }
+      alert(`Reminder emails sent: ${data?.sent ?? 0}`);
+    } catch (e) {
+      console.error('[send-reminders]', e);
+      alert('Error sending reminders. Please try again.');
+    } finally {
+      btn.disabled = false;
+    }
+  };
 }
 
 // ----------------------
-// CSV Export & Import
+// CSV export & import
 // ----------------------
 function csvEscape(v) {
   if (v == null) return '';
-  const s = String(v);
+  let s = String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; // stop spreadsheet formula injection
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 function parseCSV(text) {
@@ -1321,347 +826,57 @@ function parseCSV(text) {
     const ch = text[i++];
     if (inQ) {
       if (ch === '"') { if (text[i] === '"') { cur += '"'; i++; } else { inQ = false; } }
-      else { cur += ch; }
-    } else {
-      if (ch === '"') inQ = true;
-      else if (ch === ',') { row.push(cur); cur = ''; }
-      else if (ch === '\n' || ch === '\r') {
-        if (ch === '\r' && text[i] === '\n') i++;
-        row.push(cur); rows.push(row); row = []; cur = '';
-      } else { cur += ch; }
-    }
+      else cur += ch;
+    } else if (ch === '"') inQ = true;
+    else if (ch === ',') { row.push(cur); cur = ''; }
+    else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i] === '\n') i++;
+      row.push(cur); rows.push(row); row = []; cur = '';
+    } else cur += ch;
   }
   row.push(cur); rows.push(row);
-  const cleaned = rows.filter(r => r.some(c => c.trim() !== ''));
-  const header = (cleaned.shift() || []).map(h => h.trim().toLowerCase());
+  const cleaned = rows.filter((r) => r.some((c) => c.trim() !== ''));
+  const header = (cleaned.shift() || []).map((h) => h.trim().toLowerCase());
   return { header, rows: cleaned };
 }
-async function exportCSV() {
-  if (!currentEvent || currentUser?.username !== currentEvent.created_by) { alert('Only the event creator can export CSV.'); return; }
-  const { data: items, error } = await supabase
-    .from('event_items')
-    .select('item_name, quantity_required, item_description')
-    .eq('event_id', currentEvent.id)
-    .order('item_name', { ascending: true });
-  if (error) { alert('Export failed: ' + error.message); return; }
-
-  const header = ['item_name','quantity_required','item_description'];
-  const lines = [header.join(',')].concat(
-    (items || []).map(i => [csvEscape(i.item_name), csvEscape(i.quantity_required), csvEscape(i.item_description ?? '')].join(','))
+function exportCSV() {
+  const lines = [['item_name', 'quantity_required', 'item_description'].join(',')].concat(
+    [...view.items].sort((a, b) => a.name.localeCompare(b.name))
+      .map((i) => [csvEscape(i.name), csvEscape(i.needed), csvEscape(i.description ?? '')].join(','))
   );
-  const csv = lines.join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = `${currentEvent.slug || 'event'}-items.csv`; a.click();
+  a.href = url; a.download = `${slug || 'event'}-items.csv`; a.click();
   URL.revokeObjectURL(url);
 }
 async function importCSVFile(evt) {
   const file = evt.target.files?.[0];
   evt.target.value = '';
   if (!file) return;
-  if (!currentEvent || currentUser?.username !== currentEvent.created_by) { alert('Only the event creator can import CSV.'); return; }
-  const text = await file.text();
-  const { header, rows } = parseCSV(text);
-  const col = (name, ...alts) => {
-    const names = [name, ...alts].map(s => s.toLowerCase());
-    return header.findIndex(h => names.includes(h));
-  };
+  const { header, rows } = parseCSV(await file.text());
+  const col = (...names) => header.findIndex((h) => names.includes(h));
   const idxName = col('item_name', 'name', 'item');
-  const idxQty  = col('quantity_required', 'quantity', 'qty', 'count');
+  const idxQty = col('quantity_required', 'quantity', 'qty', 'count');
   const idxDesc = col('item_description', 'description', 'desc');
   if (idxName === -1 || idxQty === -1) { alert('CSV must include headers: item_name and quantity_required.'); return; }
-
-  const { data: existing, error: exErr } = await supabase.from('event_items').select('id, item_name').eq('event_id', currentEvent.id);
-  if (exErr) { alert('Import failed: ' + exErr.message); return; }
-  const byName = Object.create(null);
-  (existing || []).forEach(it => { byName[it.item_name.toLowerCase()] = it; });
-
-  const inserts = [];
-  const updates = [];
-  rows.forEach(r => {
-    const name = (r[idxName] || '').trim();
-    if (!name) return;
-    const qty = parseInt(r[idxQty], 10) || 0;
-    const desc = (idxDesc !== -1 && r[idxDesc]) ? String(r[idxDesc]).trim() : null;
-    const match = byName[name.toLowerCase()];
-    if (match) updates.push({ id: match.id, item_name: name, quantity_required: qty, item_description: desc });
-    else inserts.push({ event_id: currentEvent.id, item_name: name, quantity_required: qty, item_description: desc });
-  });
-
-  if (inserts.length) {
-    const { error } = await supabase.from('event_items').insert(inserts);
-    if (error) { alert('Import (insert) failed: ' + error.message); return; }
-  }
-  for (const u of updates) {
-    const { error } = await supabase.from('event_items')
-      .update({ item_name: u.item_name, quantity_required: u.quantity_required, item_description: u.item_description })
-      .eq('id', u.id);
-    if (error) { alert('Import (update) failed: ' + error.message); return; }
-  }
-  alert(`Imported ${inserts.length} new item(s), updated ${updates.length} item(s).`);
-  await loadEvent(currentEvent.slug);
+  const items = rows
+    .map((r) => ({
+      name: (r[idxName] || '').trim(),
+      needed: parseInt(r[idxQty], 10) || 1,
+      description: idxDesc !== -1 ? (r[idxDesc] || '').trim() : ''
+    }))
+    .filter((r) => r.name);
+  await mutate(() => rpc('host_import_items', { p_slug: slug, p_items: items }));
 }
 
 // ----------------------
-// 5. Helper: Commit Listeners
+// 5. Routing
 // ----------------------
-function attachCommitListeners() {
-  // Inline onclick handlers in renderCommitmentForm already handle commitments.
-}
-
-// NEW: force-prompt for email if host turned it on after user already joined
-function promptForEmailIfRequired() {
-  if (!currentEvent.collect_real_emails) return;
-  if (!currentUser) return;
-  if (currentUser.real_email) return;
-
-  const overlay = document.createElement('div');
-  overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:3000;';
-  const box = document.createElement('div');
-  box.style = 'background:#fff;padding:20px;border-radius:8px;max-width:360px;width:90%;';
-  box.innerHTML = `
-    <h3>Email required</h3>
-    <p>The host enabled email reminders for this event. Please enter your email.</p>
-    <input type="email" id="forceEmail" style="width:100%;margin:10px 0;" placeholder="you@example.com">
-    <div style="text-align:right;"><button id="saveEmailBtn">Save</button></div>
-  `;
-  overlay.appendChild(box);
-  document.body.appendChild(overlay);
-
-  document.getElementById('saveEmailBtn').addEventListener('click', async () => {
-    const v = document.getElementById('forceEmail').value.trim();
-    if (!v) { alert('Email is required.'); return; }
-    const { error } = await supabase.from('event_users').update({ real_email: v }).eq('id', currentUser.id);
-    if (error) { alert('Could not save email: ' + error.message); return; }
-    currentUser.real_email = v; overlay.remove();
-  });
-}
-
-// NEW: call Supabase Edge Function to send the emails (dashboard invoke)
-async function sendReminderEmails() {
-  if (currentUser?.username !== currentEvent.created_by) {
-    alert('Only the event creator can send reminders.');
-    return;
-  }
-
-  const btn = document.getElementById('sendRemindersBtn');
-  if (!btn) return;
-
-  const now = Date.now();
-  const until = Number(btn.dataset.cooldownUntil || 0);
-  if (until && now < until) {
-    const secs = Math.ceil((until - now) / 1000);
-    alert(`Please wait ${secs}s before trying again.`);
-    return;
-  }
-
-  const overlay = document.createElement('div');
-  overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:3000;';
-  const box = document.createElement('div');
-  box.style = 'background:#fff;padding:20px;border-radius:10px;max-width:520px;width:92%;';
-  box.innerHTML = `
-    <h3 style="margin:0 0 8px">Send reminder emails</h3>
-    <p style="margin:0 0 8px;color:#555">
-      Optional message to include near the top of the email:
-    </p>
-    <textarea id="hostMsg" rows="5" style="width:100%;resize:vertical;" placeholder="(Optional) Add a note for attendees..."></textarea>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
-      <button id="cancelSend" type="button">Cancel</button>
-      <button id="confirmSend" type="button">Send</button>
-    </div>
-  `;
-  overlay.appendChild(box);
-  document.body.appendChild(overlay);
-
-  document.getElementById('cancelSend').onclick = () => overlay.remove();
-
-  document.getElementById('confirmSend').onclick = async () => {
-    const hostMsg = (document.getElementById('hostMsg').value || '')
-      .trim()
-      .replace(/\r?\n/g, '\n')
-      .slice(0, 1000);
-
-    overlay.remove();
-    btn.disabled = true;
-
-    try {
-      const { data, error } = await supabase.functions.invoke('send-reminders', {
-        body: { event_id: currentEvent.id, host_message: hostMsg }
-      });
-
-      if (error) {
-        console.error('[send-reminders] invoke error:', error);
-        const explanation =
-          error.name === 'FunctionsFetchError'
-            ? '\n(Network/CORS/blocked request — the function was not reached.)'
-            : error.name === 'FunctionsHttpError'
-            ? '\n(Edge Function responded with a non-2xx status.)'
-            : '';
-        const serverMsg =
-          typeof data?.error === 'string' ? `\nDetails: ${data.error}` : '';
-        alert(`Error sending reminders: ${error.message}${explanation}${serverMsg}`);
-        return;
-      }
-
-      if (data?.cooldown_remaining_seconds) {
-        const s = data.cooldown_remaining_seconds;
-        alert(`Too soon. Try again in ${Math.floor(s / 60)}m ${s % 60}s.`);
-        btn.dataset.cooldownUntil = String(Date.now() + 15_000);
-        return;
-      }
-
-      if (Array.isArray(data?.errors) && data.errors.length) {
-        console.warn('Per-recipient send errors:', data.errors);
-      }
-
-      alert(`Reminder emails attempted. Sent: ${data?.sent ?? 0}`);
-    } catch (e) {
-      console.error('[send-reminders] unexpected exception:', e);
-      alert('Error sending reminders: an unexpected error occurred (see console).');
-    } finally {
-      btn.dataset.cooldownUntil = String(Date.now() + 30_000);
-      btn.disabled = false;
-    }
-  };
-}
-
-// Creator: mark event for deletion (soft delete request)
-function confirmDeleteEvent() {
-  if (currentUser?.username !== currentEvent.created_by) return;
-
-  const overlay = document.createElement('div');
-  overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:3000;';
-  const box = document.createElement('div');
-  box.style = 'background:#fff;padding:20px;border-radius:10px;max-width:480px;width:92%;';
-  box.innerHTML = `
-    <h3 style="margin:0 0 8px">Delete this event?</h3>
-    <p style="margin:0 0 10px;color:#444">This will mark the event for deletion. A server job will remove the event and all associated data.</p>
-    <div style="display:flex;gap:8px;justify-content:flex-end;">
-      <button id="cancelDelete" type="button">Cancel</button>
-      <button id="confirmDelete" type="button" style="background:#b91c1c;color:#fff;">Mark for deletion</button>
-    </div>
-  `;
-  overlay.appendChild(box);
-  document.body.appendChild(overlay);
-
-  document.getElementById('cancelDelete').onclick = () => overlay.remove();
-  document.getElementById('confirmDelete').onclick = async () => {
-    const nowIso = new Date().toISOString();
-
-    let ok = true;
-    let errMsg = '';
-
-    // Canonical: set delete_requested_at
-    const { error } = await supabase
-      .from('events')
-      .update({ delete_requested_at: nowIso })
-      .eq('id', currentEvent.id);
-
-    if (error) {
-      ok = false;
-      errMsg = error.message;
-
-      // Optional legacy support (older DBs): try boolean column
-      try {
-        const { error: legacyErr } = await supabase
-          .from('events')
-          .update({ marked_for_deletion: true })
-          .eq('id', currentEvent.id);
-        if (!legacyErr) ok = true;
-      } catch { /* ignore */ }
-    }
-
-    overlay.remove();
-
-    if (!ok) {
-      alert('Could not mark event for deletion: ' + errMsg);
-      return;
-    }
-
-    // Critical: do NOT invoke immediate purge here, or Undo will be impossible.
-    alert('Event has been marked for deletion.');
-    await loadEvent(currentEvent.slug);
-  };
-}
-
-// Creator: undo soft deletion request
-function confirmUndeleteEvent() {
-  if (currentUser?.username !== currentEvent.created_by) return;
-
-  const overlay = document.createElement('div');
-  overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:3000;';
-  const box = document.createElement('div');
-  box.style = 'background:#fff;padding:20px;border-radius:10px;max-width:480px;width:92%;';
-  box.innerHTML = `
-    <h3 style="margin:0 0 8px">Undo deletion?</h3>
-    <p style="margin:0 0 10px;color:#444">
-      This will cancel the scheduled deletion and re-enable RSVPs/commitments.
-    </p>
-    <div style="display:flex;gap:8px;justify-content:flex-end;">
-      <button id="cancelUndelete" type="button">Cancel</button>
-      <button id="confirmUndelete" type="button" style="background:#166534;color:#fff;">Undo Delete</button>
-    </div>
-  `;
-  overlay.appendChild(box);
-  document.body.appendChild(overlay);
-
-  document.getElementById('cancelUndelete').onclick = () => overlay.remove();
-
-  document.getElementById('confirmUndelete').onclick = async () => {
-    let ok = true;
-    let errMsg = '';
-
-    // Canonical: clear delete_requested_at
-    const { error } = await supabase
-      .from('events')
-      .update({ delete_requested_at: null })
-      .eq('id', currentEvent.id);
-
-    if (error) {
-      ok = false;
-      errMsg = error.message;
-    }
-
-    // Optional legacy cleanup (ignore failures)
-    if (ok) {
-      try {
-        await supabase
-          .from('events')
-          .update({ marked_for_deletion: false })
-          .eq('id', currentEvent.id);
-      } catch { /* ignore */ }
-    }
-
-    overlay.remove();
-
-    if (!ok) {
-      alert('Could not undo deletion: ' + errMsg);
-      return;
-    }
-
-    alert('Deletion cancelled.');
-    await loadEvent(currentEvent.slug);
-  };
-}
-
-// Expose functions for inline handlers
-window.updateItem = updateItem;
-window.deleteItem = deleteItem;
-window.commitItem = commitItem;
-window.exportCSV = exportCSV;
-window.importCSVFile = importCSVFile;
-window.showEditEventForm = showEditEventForm;
-window.sendReminderEmails = sendReminderEmails;
-
-// ----------------------
-// 6. App Initialization with Hash Routing
-// ----------------------
-window.addEventListener('DOMContentLoaded', async () => {
-  let slug = null;
-  if (window.location.hash && window.location.hash.startsWith('#/event/')) {
-    slug = window.location.hash.split('#/event/')[1];
-  }
-  if (slug) await loadEvent(slug);
+async function route() {
+  const m = window.location.hash.match(/^#\/event\/([^/?#]+)/);
+  if (m) await loadEvent(decodeURIComponent(m[1]));
   else renderCreateEventForm();
-});
+}
+window.addEventListener('hashchange', route);
+window.addEventListener('DOMContentLoaded', route);
