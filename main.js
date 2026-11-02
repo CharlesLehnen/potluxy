@@ -201,9 +201,28 @@ function formatEventTime(t) {
 function safeInviteUrl(u) { return /^https:\/\//i.test(u || '') ? u : null; }
 function linkHost(u) { try { return new URL(u).hostname; } catch { return ''; } }
 function inviteLabel(u) { return /(^|\.)partiful\.com$/i.test(linkHost(u)) ? 'Partiful invite' : 'Event invite'; }
-function scheduleLabel(u) { return /(^|\.)when2meet\.com$/i.test(linkHost(u)) ? 'Vote on a time (when2meet)' : 'Vote on a time'; }
+function scheduleLabel(u) {
+  const h = linkHost(u);
+  if (/(^|\.)when2meet\.com$/i.test(h)) return 'Vote on a time (when2meet)';
+  if (/(^|\.)doodle\.com$/i.test(h)) return 'Vote on a time (Doodle)';
+  return 'Vote on a time';
+}
 
-const PASSWORD_HINT = 'Optional. Without one, you can only make changes from this browser.';
+const ext = (href, label) => `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+// The two optional link fields, shared by the create form and the edit dialog.
+function linkFieldsHTML(inviteId, scheduleId, ev = {}) {
+  return `
+    <div class="field">
+      <label for="${inviteId}">Invite link <em>optional · ${ext('https://partiful.com/', 'Partiful')}, ${ext('https://www.evite.com/', 'Evite')}, etc.</em></label>
+      <input type="url" id="${inviteId}" maxlength="500" placeholder="https://partiful.com/e/…" value="${esc(ev.invite_url || '')}">
+    </div>
+    <div class="field">
+      <label for="${scheduleId}">Find-a-time link <em>optional · ${ext('https://www.when2meet.com/', 'when2meet')}, ${ext('https://doodle.com/', 'Doodle')}, etc.</em></label>
+      <input type="url" id="${scheduleId}" maxlength="500" placeholder="https://www.when2meet.com/?…" value="${esc(ev.schedule_url || '')}">
+    </div>`;
+}
+
+const PASSWORD_HINT = 'Optional. Skip it and you may not be able to change your response later.';
 
 // ----------------------
 // 1. Event creation
@@ -230,9 +249,9 @@ function renderCreateEventForm(notice = '') {
           <input type="password" id="password" maxlength="72" autocomplete="new-password">
         </label>
       </div>
-      <p class="hint">${icon('lock')}<span>Skip the password and you can only manage this event from this browser.</span></p>
+      <p class="hint">${icon('lock')}<span>Skip the password and you may not be able to edit this event later.</span></p>
       <details class="more">
-        <summary>More options <small>location, description, Partiful &amp; when2meet links, reminders</small></summary>
+        <summary>More options <small>location, description, invite &amp; scheduling links, reminders</small></summary>
         <div class="stack">
           <div class="field">
             <label for="eventLocation">Location</label>
@@ -244,13 +263,7 @@ function renderCreateEventForm(notice = '') {
           <label class="field"><span>Description</span>
             <textarea id="eventDescription" maxlength="2000" rows="2" placeholder="Parking info, dietary notes, theme…"></textarea>
           </label>
-          <label class="field"><span>Invite link <em>optional · Partiful, Evite, etc.</em></span>
-            <input type="url" id="inviteUrl" maxlength="500" placeholder="https://partiful.com/e/…">
-          </label>
-          <label class="field"><span>Find-a-time link <em>optional · when2meet, etc.</em></span>
-            <input type="url" id="scheduleUrl" maxlength="500" placeholder="https://www.when2meet.com/?…">
-          </label>
-          <p class="hint">No date yet? <a href="https://www.when2meet.com/" target="_blank" rel="noopener noreferrer">Make a when2meet</a>, paste its link here, and add the date once it's settled.</p>
+          ${linkFieldsHTML('inviteUrl', 'scheduleUrl')}
           <label class="check">
             <input type="checkbox" id="collectEmails">
             <span>Ask guests for an email so I can send reminders. Only I will see them.</span>
@@ -377,7 +390,7 @@ function headerHTML(isHost) {
             : `<span>${esc(ev.location)}</span>`}</li>` : ''}
         </ul>` : ''}
       ${ev.description ? `<p class="event-description">${esc(ev.description)}</p>` : ''}
-      <div class="head-links">${schedule ? `<a id="scheduleLink" class="btn ${ev.date ? 'btn-ghost' : 'btn-sage'} btn-sm" href="${esc(schedule)}" target="_blank" rel="noopener noreferrer">${icon('calendar')} ${ev.date ? scheduleLabel(schedule) : `Date TBD: ${scheduleLabel(schedule).toLowerCase()}`}</a>` : ''}${invite ? `<a id="inviteLink" class="btn btn-ghost btn-sm" href="${esc(invite)}" target="_blank" rel="noopener noreferrer">${icon('external')} ${inviteLabel(invite)}</a>` : ''}${ev.date ? calendarMenuHTML() : ''}</div>
+      <div class="head-links">${schedule ? `<a id="scheduleLink" class="btn ${ev.date ? 'btn-ghost' : 'btn-sage'} btn-sm" href="${esc(schedule)}" target="_blank" rel="noopener noreferrer">${icon('calendar')} ${ev.date ? scheduleLabel(schedule) : `Date TBD: ${scheduleLabel(schedule).replace(/^Vote/, 'vote')}`}</a>` : ''}${invite ? `<a id="inviteLink" class="btn btn-ghost btn-sm" href="${esc(invite)}" target="_blank" rel="noopener noreferrer">${icon('external')} ${inviteLabel(invite)}</a>` : ''}${ev.date ? calendarMenuHTML() : ''}</div>
       <div id="shareUrlContainer" class="sharebar">
         <input type="text" id="shareUrl" value="${esc(eventUrl())}" readonly aria-label="Event link">
         <button id="copyShareUrl" type="button" class="btn btn-sage" data-act="copy-link">${icon('copy')} Copy link</button>
@@ -395,25 +408,13 @@ function hostToolsHTML() {
       <span class="host-tools-label">Host</span>
       <button id="editEventBtn" type="button" class="btn btn-ghost btn-sm" data-act="edit-event">${icon('edit')} Edit details</button>
       ${ev.collect_emails ? `<button id="sendRemindersBtn" type="button" class="btn btn-ghost btn-sm" data-act="reminders">${icon('mail')} Email reminders</button>` : ''}
-      <button id="exportCSV" type="button" class="btn btn-ghost btn-sm" data-act="export-csv">Export CSV</button>
+      <button id="exportCSV" type="button" class="btn btn-ghost btn-sm" data-act="export-csv" title="Download your items as a CSV. Edit it in a spreadsheet, then use Import CSV.">Export CSV/Template</button>
       <button id="importCSV" type="button" class="btn btn-ghost btn-sm" data-act="import-csv">Import CSV</button>
       <input id="importCSVInput" type="file" accept=".csv,text/csv" hidden>
       ${ev.deleting
         ? `<button id="undeleteEventBtn" type="button" class="btn btn-sage btn-sm push" data-act="undelete">Undo delete</button>`
         : `<button id="deleteEventBtn" type="button" class="btn btn-danger btn-sm push" data-act="delete-event">Delete event</button>`}
-    </div>
-    ${linkTipHTML()}`;
-}
-
-// Optional nudge to connect the event to Partiful / when2meet (hidden once added).
-function linkTipHTML() {
-  const ev = view.event;
-  if (ev.deleting) return '';
-  const missing = [];
-  if (!ev.invite_url) missing.push(['Partiful', 'editInviteUrl']);
-  if (!ev.schedule_url && !ev.date) missing.push(['when2meet', 'editScheduleUrl']);
-  if (!missing.length) return '';
-  return `<p class="tip">Using ${missing.map((m) => m[0]).join(' or ')}? <button type="button" class="linkish" data-act="edit-event" data-focus="${missing[0][1]}">Add the link</button> so guests can hop between them. Totally optional.</p>`;
+    </div>`;
 }
 
 // ---------- Calendar ----------
@@ -725,8 +726,8 @@ function pwdNudgeHTML() {
   return `
     <div class="nudge" id="pwdNudge">${icon('lock')}
       <div>
-        <span>Only this browser can ${me.is_host ? 'manage this event' : 'edit your response'}.
-          <button type="button" class="linkish" id="showPwdForm" data-act="show-pwd">Add a password</button> to use other devices too.</span>
+        <span>No password yet, so you may lose the ability to ${me.is_host ? 'manage this event' : 'edit your response'} (new device, cleared cookies).
+          <button type="button" class="linkish" id="showPwdForm" data-act="show-pwd">Add a password</button></span>
         <form id="pwdForm" class="inline-form" hidden>
           <input type="password" id="newPwd" maxlength="72" autocomplete="new-password" placeholder="4+ characters" aria-label="New password">
           <button type="submit" class="btn btn-primary btn-sm">Save</button>
@@ -1001,12 +1002,7 @@ function showEditEventForm(focusId) {
       <label class="field"><span>Description</span>
         <textarea id="editEventDescription" maxlength="2000" rows="3">${esc(ev.description || '')}</textarea>
       </label>
-      <label class="field"><span>Invite link <em>optional · Partiful, Evite, etc.</em></span>
-        <input type="url" id="editInviteUrl" maxlength="500" placeholder="https://partiful.com/e/…" value="${esc(ev.invite_url || '')}">
-      </label>
-      <label class="field"><span>Find-a-time link <em>optional · when2meet, etc.</em></span>
-        <input type="url" id="editScheduleUrl" maxlength="500" placeholder="https://www.when2meet.com/?…" value="${esc(ev.schedule_url || '')}">
-      </label>
+      ${linkFieldsHTML('editInviteUrl', 'editScheduleUrl', ev)}
       <label class="check">
         <input type="checkbox" id="editCollectEmails" ${ev.collect_emails ? 'checked' : ''}>
         <span>Ask guests for an email so I can send reminders</span>

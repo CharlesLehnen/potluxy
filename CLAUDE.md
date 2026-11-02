@@ -7,6 +7,13 @@
 
 - Guides, how-tos, and other documents written for the user go in `claude/documents/`.
 
+## Database (SQL)
+
+- Live database changes go in a new, re-runnable file in `code/migrations/` (the user runs it in the Supabase SQL editor).
+- **Whenever any SQL changes, also edit `code/supabase_config.sql` as if the change had been part of the initial deployment from the start.** That file is the complete current schema (fresh install) and the single place to read all database functionality. No legacy/upgrade steps belong in it.
+- `archive/supabase_config_original_2025.sql` is the frozen pre-migration baseline; never edit it.
+- `claude/scripts/skills/db_test/run_db_tests.sh` fails if `code/supabase_config.sql` differs from "original + all migrations", so run it after every SQL change.
+
 ## Scripts
 
 Before writing any new script, read `claude/scripts/SKILLS.md` to check if one already exists. Modify existing scripts rather than rewriting from scratch. If you create a new script:

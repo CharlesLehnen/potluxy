@@ -1,8 +1,8 @@
 """End-to-end test of the real site in Chromium.
 
 Serves the repo locally and answers the page's Supabase calls (anonymous auth +
-/rest/v1/rpc/*) from a throwaway Postgres loaded with the base schema and all
-migrations, so the actual main.js runs against the actual SQL functions.
+/rest/v1/rpc/*) from a throwaway Postgres loaded with code/supabase_config.sql
+(the complete current schema), so the actual main.js runs against the actual SQL functions.
 Third-party scripts (ads, analytics, translate, maps) are blocked.
 
 Usage:
@@ -48,12 +48,10 @@ def start_db(tmp: Path, port: int) -> str:
     run = lambda *a, **k: subprocess.run([*psql, *a], check=True, capture_output=True, env={**__import__("os").environ, **env}, **k)
     run("-d", "postgres", "-c", "CREATE DATABASE potluxy_test")
     run("-d", "potluxy_test", "-f", str(DB_TEST / "stub_supabase.sql"))
-    base = (REPO / "code" / "supabase_config.sql").read_text()
-    base = base.replace("CREATE POLICY IF NOT EXISTS", "CREATE POLICY")
-    base = "\n".join(l for l in base.splitlines() if "pg_cron" not in l)
-    run("-d", "potluxy_test", input=base.encode())
-    for mig in sorted((REPO / "code" / "migrations").glob("*.sql")):
-        run("-d", "potluxy_test", "-f", str(mig))
+    # Fresh install: the complete current schema (run_db_tests.sh covers the upgrade path).
+    schema = (REPO / "code" / "supabase_config.sql").read_text()
+    schema = "\n".join(l for l in schema.splitlines() if "pg_cron" not in l)
+    run("-d", "potluxy_test", input=schema.encode())
     return f"host={tmp} port={port} user=postgres dbname=potluxy_test"
 
 
@@ -161,6 +159,10 @@ def run_scenario(browser, base_url: str, supabase_url: str, conn, shots: Path | 
     host = new_page()
     host.goto(base_url)
     shot(host, "desktop-home")
+    if shots:
+        host.click("details.more summary")
+        shot(host, "desktop-home-more")
+        host.click("details.more summary")
     host.fill("#eventName", "Friendsgiving <b>2026</b>")
     host.fill("#eventDate", "2026-11-26")
     host.fill("#eventTime", "16:00")
@@ -374,16 +376,24 @@ def run_scenario(browser, base_url: str, supabase_url: str, conn, shots: Path | 
     expect(minimal.locator("#inviteLink")).to_have_count(0)
     expect(minimal.locator("details.menu")).to_have_count(0)
     ok("Partiful link and date are optional")
-    expect(minimal.locator(".tip")).to_contain_text("Partiful or when2meet")
-    minimal.click(".tip [data-act=edit-event]")
-    expect(minimal.locator("#editInviteUrl")).to_be_focused()
+    expect(minimal.locator(".tip")).to_have_count(0)
+    minimal.click("#editEventBtn")
+    expect(minimal.locator("label[for=editScheduleUrl] a", has_text="Doodle")).to_have_attribute("href", "https://doodle.com/")
     minimal.fill("#editScheduleUrl", "https://www.when2meet.com/?123-AbC")
     minimal.click("#saveEventChanges")
     expect(minimal.locator("#scheduleLink")).to_contain_text("Date TBD")
     expect(minimal.locator("#scheduleLink")).to_have_attribute("href", "https://www.when2meet.com/?123-AbC")
-    expect(minimal.locator(".tip")).to_contain_text("Using Partiful?")
-    ok("optional when2meet link: tip, edit, 'Date TBD' button")
+    minimal.click("#editEventBtn")
+    minimal.fill("#editScheduleUrl", "https://doodle.com/meeting/participate/id/abc")
+    minimal.click("#saveEventChanges")
+    expect(minimal.locator("#scheduleLink")).to_contain_text("(Doodle)")
+    ok("optional when2meet/Doodle link: 'Date TBD' button, linked labels, no nag tip")
     shot(minimal, "desktop-minimal")
+
+    minimal.click(".tab-button[data-tab=about]")
+    expect(minimal.locator("#tab-about .steps li")).to_have_count(4)
+    ok("About page has the numbered how-it-works steps")
+    shot(minimal, "desktop-about")
 
     # Bad link falls back to create form.
     stray = new_page()
