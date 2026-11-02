@@ -28,6 +28,15 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE SCHEMA IF NOT EXISTS private;
 REVOKE ALL ON SCHEMA private FROM PUBLIC, anon, authenticated;
 
+-- Safety snapshot of everything this migration could affect (first run only;
+-- IF NOT EXISTS keeps the original copy on re-runs). Drop these after a few weeks.
+CREATE TABLE IF NOT EXISTS private.backup_20261102_events      AS TABLE public.events;
+CREATE TABLE IF NOT EXISTS private.backup_20261102_event_items AS TABLE public.event_items;
+CREATE TABLE IF NOT EXISTS private.backup_20261102_event_users AS TABLE public.event_users;
+CREATE TABLE IF NOT EXISTS private.backup_20261102_commitments AS TABLE public.commitments;
+CREATE TABLE IF NOT EXISTS private.backup_20261102_auth_aliases AS
+  SELECT id, email, encrypted_password FROM auth.users WHERE email ILIKE '%@mailinator.com';
+
 ALTER TABLE public.events ADD COLUMN IF NOT EXISTS invite_url TEXT;
 
 -- ---------------------------------------------------------------------------

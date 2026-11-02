@@ -31,6 +31,10 @@ BEGIN EXECUTE q INTO r; RETURN r->>'error'; END $$;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA t TO anon, authenticated;
 
 -- ---- Legacy migration (as superuser) --------------------------------------
+SELECT t.ok((SELECT count(*) FROM private.backup_20261102_event_users) = 3
+        AND (SELECT count(*) FROM public.event_users) = 3
+        AND (SELECT count(*) FROM public.commitments) = 1, 'no app rows lost; snapshot taken');
+SELECT t.ok((SELECT count(*) FROM private.backup_20261102_auth_aliases) = 2, 'old alias logins backed up (survives re-run)');
 SELECT t.ok((SELECT count(*) FROM auth.users WHERE email ILIKE '%mailinator%') = 0, 'mailinator alias logins neutralized');
 SELECT t.ok((SELECT count(*) FROM private.member_credentials) = 1, 'only real passwords migrated (Jane yes, Bob''s default no)');
 SELECT t.ok((SELECT count(*) FROM private.member_sessions) = 2, 'existing browser sessions kept for Jane and Bob');
