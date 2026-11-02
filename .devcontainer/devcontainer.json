@@ -1,0 +1,26 @@
+{
+  "name": "Potluxy",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+
+  "mounts": [
+    "source=${localEnv:USERPROFILE}/.continue,target=/home/vscode/.continue,type=bind,consistency=cached"
+  ],
+
+  "features": {
+    "ghcr.io/devcontainers/features/conda:1": {
+      "variant": "micromamba"
+    }
+  },
+
+  "postCreateCommand": "bash -lc 'micromamba create -y -p /workspace/.conda -f /workspace/environment.yml || micromamba env update -y -p /workspace/.conda -f /workspace/environment.yml --prune'",
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/workspace/.conda/bin/python"
+      }
+    }
+  }
+}
