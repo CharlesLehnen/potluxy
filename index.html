@@ -118,6 +118,7 @@
     <a href="#/" class="brand" aria-label="Potluxy home">Potluxy<sup>&trade;</sup></a>
     <nav class="nav-tabs" aria-label="Main">
       <button class="tab-button active" data-tab="plan" type="button">Plan an event</button>
+      <button class="tab-button" data-tab="mine" type="button" id="myEventsTab" hidden>My events</button>
       <button class="tab-button" data-tab="about" type="button">About</button>
     </nav>
     <div id="google_translate_element" class="translate-widget"></div>
@@ -131,6 +132,16 @@
         <p class="loading">Loading&hellip;</p>
         <noscript><p>Potluxy needs JavaScript to create and view events.</p></noscript>
       </main>
+    </div>
+  </div>
+
+  <!-- Tab: My events (filled by main.js; only shown once this browser has events) -->
+  <div id="tab-mine" class="tab-content">
+    <div class="about-wrapper">
+      <section class="card about-section" aria-labelledby="myEventsTitle">
+        <h2 id="myEventsTitle">My events</h2>
+        <div id="myEvents"><p class="muted">Loading&hellip;</p></div>
+      </section>
     </div>
   </div>
 

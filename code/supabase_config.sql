@@ -1107,6 +1107,43 @@ BEGIN
   RETURN public.get_event(p_slug);
 END $$;
 
+-- Events this browser created or responded to (via private.member_sessions).
+CREATE OR REPLACE FUNCTION public.my_events()
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp AS $$
+DECLARE v_uid uuid := private.uid();
+BEGIN
+  RETURN COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'slug', e.slug,
+      'name', e.event_name,
+      'date', e.event_date,
+      'time', left(e.event_time::text, 5),
+      'location', e.event_location,
+      'host', e.created_by,
+      'is_host', u.username = e.created_by,
+      'rsvp', u.rsvp_status,
+      'deleting', e.delete_requested_at IS NOT NULL,
+      'going', (SELECT count(*) FROM event_users g WHERE g.event_id = e.id AND g.rsvp_status = 'yes'),
+      'items', (SELECT count(*) FROM event_items i WHERE i.event_id = e.id),
+      'covered', (
+        SELECT count(*) FROM event_items i
+        WHERE i.event_id = e.id
+          AND (SELECT COALESCE(sum(c.quantity), 0) FROM commitments c WHERE c.item_id = i.id) >= i.quantity_required
+      ),
+      'mine', COALESCE((
+        SELECT jsonb_agg(jsonb_build_object('name', i.item_name, 'qty', c.quantity) ORDER BY lower(i.item_name))
+        FROM commitments c JOIN event_items i ON i.id = c.item_id
+        WHERE c.user_id = u.id
+      ), '[]'::jsonb)
+    ) ORDER BY e.event_date NULLS LAST, e.created_at DESC)
+    FROM private.member_sessions s
+    JOIN public.events e ON e.id = s.event_id
+    JOIN public.event_users u ON u.id = s.member_id
+    WHERE s.auth_uid = v_uid
+  ), '[]'::jsonb);
+END $$;
+
 -- ---------------------------------------------------------------------------
 -- Grants: browsers may call the API functions and nothing else.
 -- (Supabase grants EXECUTE on new public functions to anon by default.)
@@ -1124,7 +1161,8 @@ REVOKE ALL ON FUNCTION
   public.host_delete_item(text, uuid),
   public.host_import_items(text, jsonb),
   public.host_remove_guest(text, text),
-  public.host_set_deleted(text, boolean)
+  public.host_set_deleted(text, boolean),
+  public.my_events()
 FROM PUBLIC, anon;
 
 GRANT EXECUTE ON FUNCTION public.get_event(text) TO anon, authenticated;
@@ -1140,7 +1178,8 @@ GRANT EXECUTE ON FUNCTION
   public.host_delete_item(text, uuid),
   public.host_import_items(text, jsonb),
   public.host_remove_guest(text, text),
-  public.host_set_deleted(text, boolean)
+  public.host_set_deleted(text, boolean),
+  public.my_events()
 TO authenticated;
 
 

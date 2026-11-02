@@ -23,6 +23,9 @@
     });
     // Following any link (brand, event link) brings the planner back into view.
     window.addEventListener('hashchange', function () { showTab('plan'); });
-    document.querySelector('.brand').addEventListener('click', function () { showTab('plan'); });
+    // In-app links (brand, My events cards) may point at the page already open, so no hashchange fires.
+    document.addEventListener('click', function (e) {
+      if (e.target.closest && e.target.closest('a[href^="#/"]')) showTab('plan');
+    });
   });
 })();

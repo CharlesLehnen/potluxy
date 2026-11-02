@@ -231,27 +231,34 @@ function renderCreateEventForm(notice = '') {
   slug = null; view = null;
   document.body.classList.remove('is-event', 'sheet-open');
   app.innerHTML = `
-    <form id="eventForm" class="card stack">
-      <h2 class="card-title">Start an event</h2>
+    <form id="eventForm" class="card stack create-form">
+      <header class="create-head">
+        <h2 class="card-title">Who's bringing what?</h2>
+        <p class="create-sub">Make a list, share one link, and guests claim what they'll bring. Free, no accounts.</p>
+      </header>
       <div id="eventFormError" class="err" role="alert"></div>
-      <label class="field"><span>Event name</span>
-        <input type="text" id="eventName" maxlength="120" required placeholder="e.g. Friendsgiving 2026">
-      </label>
-      <div class="row-2">
-        <label class="field"><span>Date <em>optional</em></span><input type="date" id="eventDate"></label>
-        <label class="field"><span>Time <em>optional</em></span><input type="time" id="eventTime"></label>
+      <div class="group">
+        <label class="field"><span>Event name</span>
+          <input type="text" id="eventName" maxlength="120" required placeholder="e.g. Friendsgiving 2026">
+        </label>
+        <div class="row-2">
+          <label class="field"><span>Date <em>optional</em></span><input type="date" id="eventDate"></label>
+          <label class="field"><span>Time <em>optional</em></span><input type="time" id="eventTime"></label>
+        </div>
       </div>
-      <div class="row-2">
-        <label class="field"><span>Your name</span>
-          <input type="text" id="username" maxlength="40" required autocomplete="name" placeholder="e.g. Jane D.">
-        </label>
-        <label class="field"><span>Password <em>optional</em></span>
-          <input type="password" id="password" maxlength="72" autocomplete="new-password">
-        </label>
+      <div class="group">
+        <div class="row-2">
+          <label class="field"><span>Your name</span>
+            <input type="text" id="username" maxlength="40" required autocomplete="name" placeholder="e.g. Jane D.">
+          </label>
+          <label class="field"><span>Password <em>optional</em></span>
+            <input type="password" id="password" maxlength="72" autocomplete="new-password" placeholder="••••">
+          </label>
+        </div>
       </div>
       <p class="hint">${icon('lock')}<span>Skip the password and you may not be able to edit this event later.</span></p>
       <details class="more">
-        <summary>More options <small>location, description, invite &amp; scheduling links, reminders</small></summary>
+        <summary>More options <small>location, description, links, reminders</small></summary>
         <div class="stack">
           <div class="field">
             <label for="eventLocation">Location</label>
@@ -338,7 +345,12 @@ async function loadEvent(s) {
 }
 
 // Apply a server result (fresh get_event payload) and redraw.
-function apply(result) { view = result; render(); }
+function apply(result) {
+  const meChanged = JSON.stringify(view?.me ?? null) !== JSON.stringify(result.me ?? null);
+  view = result;
+  render();
+  if (meChanged) refreshMyEvents(); // joined, signed in/out, or changed RSVP
+}
 
 function render() {
   const ev = view.event;
@@ -395,7 +407,7 @@ function headerHTML(isHost) {
         <input type="text" id="shareUrl" value="${esc(eventUrl())}" readonly aria-label="Event link">
         <button id="copyShareUrl" type="button" class="btn btn-sage" data-act="copy-link">${icon('copy')} Copy link</button>
         ${navigator.share ? `<button type="button" class="btn btn-ghost" data-act="share">${icon('share')} Share</button>` : ''}
-        ${isHost ? `<button id="copyBlurb" type="button" class="btn btn-ghost" data-act="copy-blurb" title="A ready-made blurb for your Partiful description or group text">Copy for Partiful</button>` : ''}
+        ${isHost ? `<button id="copyBlurb" type="button" class="btn btn-ghost" data-act="copy-blurb" title="Copies a ready-made blurb with the event name, what's still needed, and the sign-up link. Paste it into your Partiful event, a group chat, social media, or anywhere else.">${icon('copy')} Copy event details</button>` : ''}
       </div>
       ${isHost ? hostToolsHTML() : ''}
     </header>`;
@@ -467,8 +479,8 @@ function downloadICS() {
   download(`${slug}.ics`, ics, 'text/calendar;charset=utf-8');
 }
 
-// Ready-to-paste text for a Partiful description, text blast, or group chat.
-function partifulBlurb() {
+// Ready-to-paste text for a Partiful event, group chat, social post, etc.
+function eventBlurb() {
   const ev = view.event;
   const open = view.items.filter((i) => i.committed < i.needed);
   const names = open.slice(0, 6).map((i) => i.name).join(', ');
@@ -1155,7 +1167,7 @@ async function importCSVFile(input) {
 const actions = {
   'copy-link': () => copyText(eventUrl(), 'Link copied. Send it to your guests!'),
   'share': () => navigator.share({ title: view.event.name, text: `What are you bringing to ${view.event.name}?`, url: eventUrl() }).catch(() => {}),
-  'copy-blurb': () => copyText(partifulBlurb(), 'Copied! Paste it into your Partiful description or a text blast.'),
+  'copy-blurb': () => copyText(eventBlurb(), 'Event details copied. Paste them into Partiful, a group chat, or anywhere.'),
   'ics': downloadICS,
   'filter': (el) => { ui.filter = el.dataset.filter; render(); },
   'bring': (el) => bring(el.dataset.id),
@@ -1231,7 +1243,54 @@ document.addEventListener('click', (e) => {
 });
 
 // ----------------------
-// 5. Routing
+// 5. My events (everything this browser created or responded to)
+// ----------------------
+let myEvents = [];
+
+async function refreshMyEvents() {
+  // Only look if this browser already has a session; never create one just to check.
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return;
+  try { myEvents = await rpc('my_events', {}); }
+  catch (err) { console.warn('[my_events]', err); return; }
+  $('myEventsTab').hidden = !myEvents.length;
+  if ($('tab-mine').classList.contains('active')) renderMyEvents();
+}
+
+function renderMyEvents() {
+  const box = $('myEvents');
+  if (!myEvents.length) { box.innerHTML = '<p class="muted">No events in this browser yet.</p>'; return; }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const isPast = (e) => e.date && localDate(e.date) < today;
+  const upcoming = myEvents.filter((e) => !isPast(e)); // server sorts by date, undated last
+  const past = myEvents.filter(isPast).reverse();
+  box.innerHTML = `
+    ${upcoming.length ? `<ul class="my-list">${upcoming.map(myEventHTML).join('')}</ul>` : ''}
+    ${past.length ? `<h3 class="sub">Past</h3><ul class="my-list">${past.map(myEventHTML).join('')}</ul>` : ''}
+    <p class="hint" style="margin-top:16px">${icon('lock')}<span>This list is saved in this browser.
+      On another device, open an event's link and sign in with your name and password to add it there.</span></p>`;
+}
+
+function myEventHTML(e) {
+  const [label, cls] = e.deleting ? ['Being deleted', 'tag-warn']
+    : e.is_host ? ['Host', 'tag-host']
+    : e.rsvp === 'no' ? ['Can\'t make it', 'tag-no']
+    : ['Going', 'tag-yes'];
+  const when = [e.date && formatDate(e.date), e.time && formatEventTime(e.time)].filter(Boolean).join(' · ') || 'Date TBD';
+  const mine = e.mine.map((m) => `${m.name} ×${Number(m.qty)}`).join(', ');
+  return `
+    <li><a class="my-event" href="#/event/${esc(encodeURIComponent(e.slug))}">
+      <span class="my-event-top"><span class="my-event-name">${esc(e.name)}</span><span class="tag ${cls}">${label}</span></span>
+      <span class="muted small">${esc(when)}${e.location ? ` · ${esc(e.location)}` : ''}</span>
+      <span class="small">${Number(e.going)} going · ${e.items ? `${Number(e.covered)} of ${Number(e.items)} items covered` : 'no items yet'}${mine ? ` · You're bringing ${esc(mine)}` : ''}</span>
+    </a></li>`;
+}
+
+$('myEventsTab').addEventListener('click', () => { renderMyEvents(); refreshMyEvents(); });
+
+// ----------------------
+// 6. Routing
 // ----------------------
 async function route() {
   closeSheet();
@@ -1243,6 +1302,7 @@ async function route() {
   } else {
     renderCreateEventForm();
   }
+  refreshMyEvents();
 }
 window.addEventListener('hashchange', route);
 if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', route);

@@ -196,8 +196,10 @@ def run_scenario(browser, base_url: str, supabase_url: str, conn, shots: Path | 
     expect(item(host, "Napkins")).to_contain_text("0/20")
     ok("host pastes a list")
     host.click("#copyBlurb")
-    expect(host.locator("#toast")).to_contain_text("Partiful")
-    ok("copy-for-Partiful blurb")
+    expect(host.locator("#copyBlurb")).to_have_text(re.compile("Copy event details"))
+    expect(host.locator("#copyBlurb")).to_have_attribute("title", re.compile("Partiful event, a group chat, social media"))
+    expect(host.locator("#toast")).to_contain_text("Event details copied")
+    ok("copy event details (Partiful, group chat, social)")
     url = host.input_value("#shareUrl")
 
     # Guest taps an item first, then gives their name: the pick is saved.
@@ -270,6 +272,25 @@ def run_scenario(browser, base_url: str, supabase_url: str, conn, shots: Path | 
     host.reload()
     expect(host.locator(".creator-summary")).to_contain_text("Out of town")
     ok("decline + message reaches host only")
+
+    # My events: each browser lists what it created / responded to.
+    def my_card(page, name):
+        page.click("#myEventsTab")
+        return page.locator("#myEvents .my-event", has_text=name)
+    expect(host.locator("#myEventsTab")).to_be_visible()
+    expect(my_card(host, "Friendsgiving")).to_contain_text("Host")
+    expect(my_card(guest, "Friendsgiving")).to_contain_text("Going")
+    expect(my_card(guest, "Friendsgiving")).to_contain_text("You're bringing Pie ×1, Rolls ×2")
+    expect(my_card(decliner, "Friendsgiving")).to_contain_text("Can't make it")
+    for page in (host, guest, decliner):
+        page.locator("#myEvents .my-event", has_text="Friendsgiving").click()
+        expect(page.locator("#tab-plan")).to_be_visible()
+    expect(guest.get_by_text("Responding as")).to_contain_text("Dana")
+    newcomer = new_page()
+    newcomer.goto(base_url)
+    expect(newcomer.locator("#eventForm")).to_be_visible()
+    expect(newcomer.locator("#myEventsTab")).to_be_hidden()
+    ok("My events tab: host/going/can't-make-it, opens event; hidden for new visitors")
 
     host.locator(f"[data-remove-guest='{xss_name}']").click()
     host.click("#askOk")

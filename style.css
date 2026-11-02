@@ -99,6 +99,61 @@ ul, ol { padding-left: 1.25em; }
 @media (min-width: 860px) { .plan-layout { padding-top: 48px; } }
 #app { min-width: 0; }
 
+/* Create form. Desktop: a plain card. Phone: an app-style screen (grouped fields, pinned button). */
+.create-head .card-title { margin-bottom: 4px; }
+.create-sub { font-size: .95rem; color: var(--muted); }
+.create-form .group { display: grid; gap: 12px; }
+
+@media (max-width: 600px) {
+  .plan-layout { padding-top: 8px; }
+  body:not(.is-event) { padding-bottom: 80px; } /* room for the pinned Create button */
+  .create-form.card { background: none; border: 0; box-shadow: none; padding: 0; gap: 14px; }
+  .create-head { padding: 4px 4px 2px; }
+  .create-head .card-title { font-size: 1.9rem; }
+
+  .create-form .group:not(details) {
+    gap: 0; overflow: hidden;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: 0 1px 2px rgba(70, 45, 20, .04);
+  }
+  .create-form .group:not(details) .field { padding: 10px 14px 8px; gap: 0; transition: background .15s; }
+  .create-form .group:not(details) .field:focus-within { background: #fff; }
+  .create-form .group:not(details) > * + * { border-top: 1px solid var(--line); }
+  .create-form .group:not(details) .row-2 { gap: 0; }
+  .create-form .group:not(details) .row-2 > .field + .field { border-left: 1px solid var(--line); }
+  .create-form .group:not(details) .field > span {
+    font-size: .72rem; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--muted);
+  }
+  .create-form .group:not(details) .field > span em { text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .create-form .group:not(details) input {
+    border: 0; border-radius: 0; background: transparent; padding: 4px 0; min-height: 34px; box-shadow: none !important;
+  }
+  .create-form .hint { padding: 0 6px; margin-top: -4px; }
+
+  .create-form details.more {
+    border: 1px solid var(--line); border-radius: 16px; background: var(--surface); padding: 0;
+  }
+  .create-form details.more summary { padding: 14px; }
+  .create-form details.more summary small { flex-basis: 100%; padding-left: 28px; }
+  .create-form details.more[open] > .stack { margin: 0; padding: 0 14px 16px; }
+
+  body:not(.is-event) #createEventBtn {
+    position: fixed; z-index: 30; left: var(--gutter); right: var(--gutter); width: auto;
+    bottom: calc(14px + env(safe-area-inset-bottom)); min-height: 52px; font-size: 1rem;
+    box-shadow: 0 8px 24px rgba(40, 28, 16, .25);
+  }
+
+  /* Compact header: the logo is the home link, translate shrinks to a globe. */
+  .topbar { flex-wrap: nowrap; padding: 10px var(--gutter); gap: 6px; }
+  .brand { font-size: 1.4rem; }
+  .nav-tabs { gap: 2px; }
+  .tab-button { padding: 7px 10px; font-size: .9rem; }
+  .tab-button[data-tab="plan"] { display: none; }
+  .translate-widget .goog-te-gadget-simple { width: 36px; height: 36px; padding: 0 !important; background-position: center !important; position: relative; }
+  .translate-widget .goog-te-gadget-simple .goog-te-menu-value { position: absolute; inset: 0; }
+  .translate-widget .goog-te-gadget-simple .goog-te-menu-value span { display: none !important; }
+}
+
 /* Event pages use the full width. */
 body.is-event .plan-layout { max-width: 1160px; padding-top: 4px; }
 
@@ -420,6 +475,23 @@ dialog.modal::backdrop { background: rgba(40, 28, 16, .42); }
 .about-section h3 { margin: 26px 0 10px; }
 .about-section p { margin-bottom: 12px; }
 .about-section ul { display: grid; gap: 6px; margin-bottom: 12px; color: var(--ink-2); }
+
+/* ---------------------------------------------------------------- my events */
+.my-list { list-style: none; padding: 0 !important; display: grid; gap: 8px; margin-bottom: 8px; }
+.my-event {
+  display: grid; gap: 3px; padding: 12px 14px; color: var(--ink); text-decoration: none;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  transition: border-color .15s, box-shadow .15s;
+}
+.my-event:hover { color: var(--ink); border-color: var(--line-strong); box-shadow: var(--shadow); }
+.my-event-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.my-event-name { font-family: var(--serif); font-weight: 600; font-size: 1.1rem; overflow-wrap: anywhere; }
+.my-event .small { color: var(--ink-2); }
+.my-event .muted.small { color: var(--muted); }
+.tag-yes { background: var(--sage-bg); border-color: #c6d8c3; color: #34523a; }
+.tag-no { background: var(--terra-bg); border-color: #efcbbd; color: var(--terra-dark); }
+.tag-host { background: var(--primary); border-color: var(--primary); color: #fff; }
+.tag-warn { background: var(--amber-bg); border-color: #ecd9a9; color: #6d5014; }
 
 /* ---------------------------------------------------------------- footer + plain pages */
 .site-footer {

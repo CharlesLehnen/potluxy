@@ -49,6 +49,7 @@ SELECT t.ok(public.get_event('legacy-abc')->'event'->>'name' = 'Legacy Friendsgi
 SELECT t.ok(NOT (public.get_event('legacy-abc') ? 'guests'), 'anon does not get guest emails');
 SELECT t.ok(public.get_event('legacy-abc')::text NOT ILIKE '%@example.com%', 'no email anywhere in public view');
 SELECT t.err('SELECT public.get_event(''nope'')', '%not found%', 'unknown slug errors');
+SELECT t.err('SELECT public.my_events()', '%permission denied%', 'anon cannot list my events');
 RESET ROLE;
 
 -- ---- Existing host keeps access ------------------------------------------
@@ -113,6 +114,16 @@ SELECT t.err('SELECT public.create_event(''{"name":"x","host_name":"Al","schedul
 SELECT t.ok(public.host_update_event(:'new_slug', '{"name":"Thanksgiving 2026!","schedule_url":""}')->'event'->>'schedule_url' IS NULL, 'host can clear the when2meet link');
 SELECT t.ok((public.update_me(:'new_slug', '{"password":"newpass"}')->'me'->>'has_password')::boolean, 'host adds password later');
 SELECT t.ok(t.rpc_error(format('SELECT public.update_me(%L, ''{"password":"other1","current_password":"bad"}'')', :'new_slug')) ILIKE '%incorrect%', 'changing password needs current one');
+
+-- ---- My events ---------------------------------------------------------------
+SELECT t.ok(jsonb_array_length(public.my_events()) = 1 AND (public.my_events()->0->>'is_host')::boolean
+        AND public.my_events()->0->>'slug' = :'new_slug', 'host sees own new event in my_events');
+SELECT t.login('dddddddd-0000-0000-0000-000000000001');
+SELECT t.ok(public.my_events() @> '[{"slug":"legacy-abc","rsvp":"yes","is_host":false}]'
+        AND public.my_events()->0->'mine' @> '[{"name":"pie","qty":1}]', 'guest sees RSVP''d event + their picks');
+SELECT t.ok(public.my_events()::text NOT ILIKE '%@%', 'my_events never includes emails');
+SELECT t.login('eeeeeeee-0000-0000-0000-000000000009');
+SELECT t.ok(public.my_events() = '[]'::jsonb, 'new browser has no events');
 
 RESET ROLE;
 \echo ALL TESTS PASSED
