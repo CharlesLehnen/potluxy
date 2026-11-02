@@ -60,7 +60,10 @@
       "RSVP tracking",
       "Password-protected editing",
       "Mobile-friendly",
-      "Multi-language support"
+      "Multi-language support",
+      "Works alongside Partiful and Evite invites",
+      "Add to Google, Apple, or Outlook calendar",
+      "Paste a whole item list at once"
     ],
     "author": {
       "@type": "Organization",
@@ -99,98 +102,79 @@
     })();
   </script>
 
-  <!-- jQuery (style.js); Supabase is imported by main.js -->
-  <script src="https://code.jquery.com/jquery-3.6.0.min.js" integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4=" crossorigin="anonymous"></script>
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600&display=swap">
 
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20251102_04">
+  <link rel="stylesheet" href="style.css?v=20261102_redesign">
 </head>
 
 
 
 <body>
-  <!-- Header Bar with Tabs + Translate -->
-  <!-- Google Translate Widget -->
-  <div id="google_translate_element" class="translate-widget"></div>
-  
-  <div class="header-bar">
-    <div class="nav-tabs">
-      <button class="tab-button active" data-tab="plan">Plan an Event</button>
-      <button class="tab-button" data-tab="about">About</button>
-    </div>
-  </div>
-
+  <header class="topbar">
+    <a href="#/" class="brand" aria-label="Potluxy home">Potluxy<sup>&trade;</sup></a>
+    <nav class="nav-tabs" aria-label="Main">
+      <button class="tab-button active" data-tab="plan" type="button">Plan an event</button>
+      <button class="tab-button" data-tab="about" type="button">About</button>
+    </nav>
+    <div id="google_translate_element" class="translate-widget"></div>
+  </header>
 
   <!-- Tab: Plan an Event -->
   <div id="tab-plan" class="tab-content active">
-    <div id="formWrapper">
-      <header class="logo">
-        <h1>Potluxy&trade;</h1>
-        <p style="text-align: center;"><i>Your ultimate tool to organize items for any group event.</i></p>
-      </header>
+    <div class="plan-layout">
+      <section class="hero" aria-label="Potluxy">
+        <p class="eyebrow">Free potluck &amp; group event planner</p>
+        <h1>Potluck sign-ups, <em>without the sign-up.</em></h1>
+        <p class="lede">Make a list, share one link, and guests claim what they&rsquo;ll bring. No accounts, no app, no group-chat chaos.</p>
+      </section>
 
       <main id="app">
-        <section aria-label="User Login Form">
-          <h2>Get Started with Your Event</h2>
-          <form id="loginForm" class="form" method="post" action="#">
-            <div class="form-item">
-              <label for="username" class="formLabel">Username</label>
-              <input type="text" id="username" class="form-style" autocomplete="off" required aria-required="true">
-            </div>
-            <div class="form-item">
-              <label for="password" class="formLabel">Password</label>
-              <input type="password" id="password" class="form-style" required aria-required="true">
-            </div>
-            <div class="form-item">
-              <button type="submit" class="login">Log In</button>
-            </div>
-          </form>
-        </section>
-
-        <section aria-label="How It Works">
-          <h2>How It Works</h2>
-          <ul>
-            <li>Create an event for your group gathering.</li>
-            <li>List items needed (food, supplies, etc.).</li>
-            <ul>
-              <li><i>For bulk editing, CSV import/export available.</i></li>
-            </ul>
-            <li>Guests can commit to bringing what they choose.</li>
-            <li>Track everything in one convenient place!</li>
-          </ul>
-        </section>
+        <p class="loading">Loading&hellip;</p>
+        <noscript><p>Potluxy needs JavaScript to create and view events.</p></noscript>
       </main>
+
+      <section class="steps" aria-label="How it works">
+        <h2>How it works</h2>
+        <ol>
+          <li><span><strong>Create an event.</strong> Just a name is enough. Date, location, and a Partiful link are all optional.</span></li>
+          <li><span><strong>List what you need.</strong> Type items one by one, paste a whole list, or import a CSV.</span></li>
+          <li><span><strong>Share one link.</strong> Guests tap &ldquo;I&rsquo;ll bring&rdquo; next to an item. No sign-up, no app.</span></li>
+          <li><span><strong>See who&rsquo;s bringing what.</strong> Gaps are highlighted, so nothing gets missed and nothing gets doubled.</span></li>
+        </ol>
+        <p class="privacy-note">Guests never see each other&rsquo;s emails. Passwords are optional and stored hashed.</p>
+      </section>
     </div>
   </div>
 
   <!-- Tab: About -->
   <div id="tab-about" class="tab-content">
     <div class="about-wrapper">
-      <section id="about" class="about-section" aria-label="About Potluxy">
+      <section id="about" class="card about-section" aria-label="About Potluxy">
         <h2>About Potluxy</h2>
         <p>
-            Potluxy is <strong>100% free</strong> and doesn't require logins for guests. Just share your event link and let everyone choose what they’re bringing.
+          Potluxy is <strong>100% free</strong> and doesn&rsquo;t require logins for guests. Just share your event link and let everyone choose what they&rsquo;re bringing.
         </p>
         <p>
-          Whenever you need multiple people to bring different items to an event, think Potluxy!
-          Potluxy is a free tool event coordination tool.
-          Whether you're planning a <strong>dinner party</strong>, organizing a festive <strong>Friendsgiving</strong>,
+          Whenever you need multiple people to bring different items to an event, think Potluxy.
+          Whether you&rsquo;re planning a <strong>dinner party</strong>, organizing a festive <strong>Friendsgiving</strong>,
           or coordinating a <strong>camping trip</strong>, Potluxy makes it simple.
         </p>
 
-        <h3>How It Works</h3>
-          <ul style="text-indent: 5.5em; list-style-type: none;">
-            <li>- <em>Create an event</em> for your group gathering.</li>
-            <li>- <em>List items</em> needed (food, supplies, etc.).*</li>
-            <li>- <em>Share</em> the event's unique URL with guests.</li>
-            <li>- Guests can <em>commit to bringing</em> what they choose.</li>
-            <li>- <em>Track</em> everything in one place.</li>
-          </ul>
-          <p style="text-indent: 8em;"><i>*For bulk editing, CSV import/export available.</i></p>
-        
-        <br><br>
-        <h3>Perfect For:</h3>
-        <ul style="text-indent: 5.5em; list-style-type: none;">
+        <h3>How it works</h3>
+        <ul>
+          <li><em>Create an event</em> for your group gathering.</li>
+          <li><em>List items</em> needed (food, supplies, etc.). Paste a list or use CSV import/export for bulk editing.</li>
+          <li><em>Share</em> the event&rsquo;s unique link with guests, or drop it into your Partiful invite.</li>
+          <li>Guests <em>commit to bringing</em> what they choose.</li>
+          <li><em>Track</em> everything in one place.</li>
+        </ul>
+
+        <h3>Perfect for</h3>
+        <ul>
           <li><strong>Holiday gatherings</strong> &mdash; Thanksgiving, Friendsgiving, Christmas, Hanukkah, Diwali, Eid, Lunar New Year, and more</li>
           <li><strong>Celebrations</strong> &mdash; birthdays, anniversaries, graduations, baby showers</li>
           <li><strong>Dinner parties</strong> &mdash; Seder dinners, potlucks, cookouts, barbecues</li>
@@ -199,19 +183,17 @@
           <li><strong>Office &amp; community</strong> &mdash; team lunches, block parties, family reunions</li>
         </ul>
 
+        <h3>Privacy</h3>
         <p>
-          No more duplicates or last-minute surprises!
-        </p>
-
-        <p>
-          Try Potluxy and simplify your group planning experience.
+          No accounts. Guests type a name, and that&rsquo;s it. Emails are only collected if the host asks for reminders, and only the host can see them.
+          Potluxy is <a href="https://github.com/CharlesLehnen/Potluxy" target="_blank" rel="noopener noreferrer">source-available</a>, so you can read exactly how your data is handled.
         </p>
       </section>
     </div>
   </div>
 
   <footer class="site-footer">
-    <small>© 2025 Potluxy · All rights reserved · Updated 2025-12-18 18:36</small>
+    <small>© 2024–2026 Potluxy · <a href="https://github.com/CharlesLehnen/Potluxy" target="_blank" rel="noopener noreferrer">Source</a> (PolyForm Noncommercial)</small>
 
     <nav aria-label="Footer">
       <a href="/privacy-policy.html">Privacy</a>

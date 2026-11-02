@@ -1,46 +1,28 @@
-// style.js
-$(document).ready(function () {
-  // one selector to rule them all
-  const focusableSelector =
-    'input[type="text"], input[type="password"], input[type="date"], input[type="time"], textarea';
-
-  // actually grab them
-  const $focusables = $(focusableSelector);
-
-  // Input focus/blur effects
-  $focusables.on('focus', function () {
-    $('#formWrapper').addClass('darken-bg');
-    $('#google_translate_element').css({
-      'background-color': 'rgb(117, 112, 112)',
-      'border-radius': '0',
-      'width': '100vw'
+// style.js — header tabs (Plan an event / About). No dependencies.
+// Pre-redesign version (jQuery): archive/2026-11-02_pre_redesign/style.js
+(function () {
+  function showTab(name) {
+    document.querySelectorAll('.tab-button').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.tab === name);
     });
-    $('h1').css('color', '#44aacc');
-  });
-
-  // handle blur, but only remove the darkening if NOTHING is focused anymore
-  $(document).on('blur', focusableSelector, function () {
-    // check if any matching input is still focused (e.g. user tabbed to the next one)
-    const stillFocused = $(focusableSelector).is(':focus');
-    if (stillFocused) return;
-
-    $('#formWrapper').removeClass('darken-bg');
-    $('#google_translate_element').css({
-      'background-color': 'rgba(255, 255, 255, 0.9)',
-      'border-radius': '0',
-      'width': '100vw'
+    document.querySelectorAll('.tab-content').forEach(function (t) {
+      t.classList.toggle('active', t.id === 'tab-' + name);
     });
-    $('h1').css('color', '#2c3e50');
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.tab-button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        // "Plan an event" from an event page goes back to the create form.
+        if (b.dataset.tab === 'plan' && document.body.classList.contains('is-event') &&
+            document.getElementById('tab-plan').classList.contains('active')) {
+          window.location.hash = '#/';
+        }
+        showTab(b.dataset.tab);
+      });
+    });
+    // Following any link (brand, event link) brings the planner back into view.
+    window.addEventListener('hashchange', function () { showTab('plan'); });
+    document.querySelector('.brand').addEventListener('click', function () { showTab('plan'); });
   });
-
-  // Tab switching logic
-  $('.tab-button').on('click', function () {
-    const targetTab = $(this).data('tab');
-
-    $('.tab-button').removeClass('active');
-    $(this).addClass('active');
-
-    $('.tab-content').removeClass('active');
-    $(`#tab-${targetTab}`).addClass('active');
-  });
-});
+})();

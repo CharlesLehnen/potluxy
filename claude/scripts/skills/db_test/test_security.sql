@@ -102,12 +102,15 @@ SELECT t.ok(NOT (public.host_set_deleted('legacy-abc', false)->'event'->>'deleti
 
 -- ---- New event -------------------------------------------------------------
 SELECT t.login('ffffffff-0000-0000-0000-000000000001');
-SELECT public.create_event('{"name":"Thanksgiving 2026!","host_name":"Alex","date":"2026-11-26","time":"16:00","invite_url":"https://partiful.com/e/abc"}')->>'slug' AS new_slug \gset
+SELECT public.create_event('{"name":"Thanksgiving 2026!","host_name":"Alex","date":"2026-11-26","time":"16:00","invite_url":"https://partiful.com/e/abc","schedule_url":"https://www.when2meet.com/?123-AbC"}')->>'slug' AS new_slug \gset
 SELECT t.ok(:'new_slug' ~ '^thanksgiving-2026-[0-9a-f]{12}$', 'slug has 48-bit random suffix');
 SELECT t.ok((public.get_event(:'new_slug')->'me'->>'has_password')::boolean = false, 'passwordless host flagged');
 SELECT t.ok(public.get_event(:'new_slug')->'event'->>'time' = '16:00', 'time formatted');
 SELECT t.err('SELECT public.create_event(''{"name":"x","host_name":"Al","invite_url":"javascript:alert(1)"}'')', '%https://%', 'non-https invite links rejected');
 SELECT t.err('SELECT public.create_event(''{"name":"x","host_name":"Al","password":"abc"}'')', '%4 to 72%', 'short password rejected');
+SELECT t.ok(public.get_event(:'new_slug')->'event'->>'schedule_url' = 'https://www.when2meet.com/?123-AbC', 'when2meet link saved and returned');
+SELECT t.err('SELECT public.create_event(''{"name":"x","host_name":"Al","schedule_url":"http://when2meet.com/?1"}'')', '%https://%', 'non-https schedule links rejected');
+SELECT t.ok(public.host_update_event(:'new_slug', '{"name":"Thanksgiving 2026!","schedule_url":""}')->'event'->>'schedule_url' IS NULL, 'host can clear the when2meet link');
 SELECT t.ok((public.update_me(:'new_slug', '{"password":"newpass"}')->'me'->>'has_password')::boolean, 'host adds password later');
 SELECT t.ok(t.rpc_error(format('SELECT public.update_me(%L, ''{"password":"other1","current_password":"bad"}'')', :'new_slug')) ILIKE '%incorrect%', 'changing password needs current one');
 
