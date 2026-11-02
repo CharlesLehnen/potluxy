@@ -3,6 +3,10 @@
 - **Never run git commit, git push, git reset, git rebase, or any command that alters repository history.** The user makes all commits.
 - You may create, edit, and delete files freely. Leave version control to the user.
 
+## Documents
+
+- Guides, how-tos, and other documents written for the user go in `claude/documents/`.
+
 ## Scripts
 
 Before writing any new script, read `claude/scripts/SKILLS.md` to check if one already exists. Modify existing scripts rather than rewriting from scratch. If you create a new script:

@@ -1,0 +1,9 @@
+name: potluxy
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.10
+  - pip
+  - pip:
+    - Pillow>=13.0.0
